@@ -1,0 +1,9 @@
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.csproj.AssemblyReference.cache
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.ImgsToPDF.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.GalleryForm.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.Lang.Extra.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.Properties.Resources.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.GalleryForm.zh.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.ImgsToPDF.zh.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.Lang.Extra.zh.resources
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDF\obj\x64\Debug\ImgsToPDF.csproj.GenerateResource.cache

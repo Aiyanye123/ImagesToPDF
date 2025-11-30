@@ -27,6 +27,7 @@
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ImgsToPDF));
             this.progressBar = new System.Windows.Forms.ProgressBar();
             this.StartButton = new System.Windows.Forms.Button();
+            this.GalleryButton = new System.Windows.Forms.Button();
             this.MsgLabel = new System.Windows.Forms.Label();
             this.PathLabel = new System.Windows.Forms.Label();
             this.FolderImg = new System.Windows.Forms.PictureBox();
@@ -45,6 +46,7 @@
             this.englishToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.chineseToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuAbout = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripMenuTopMost = new System.Windows.Forms.ToolStripMenuItem();
             this.Recursive = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.FolderImg)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.PicInFolder)).BeginInit();
@@ -62,6 +64,13 @@
             this.StartButton.Name = "StartButton";
             this.StartButton.UseVisualStyleBackColor = true;
             this.StartButton.Click += new System.EventHandler(this.StartButton_Click);
+            // 
+            // GalleryButton
+            // 
+            resources.ApplyResources(this.GalleryButton, "GalleryButton");
+            this.GalleryButton.Name = "GalleryButton";
+            this.GalleryButton.UseVisualStyleBackColor = true;
+            this.GalleryButton.Click += new System.EventHandler(this.GalleryButton_Click);
             // 
             // MsgLabel
             // 
@@ -113,7 +122,8 @@
             this.toolStripMenuFile,
             this.toolStripMenuConfigFile,
             this.languageToolStripMenuItem,
-            this.toolStripMenuAbout});
+            this.toolStripMenuAbout,
+            this.toolStripMenuTopMost});
             resources.ApplyResources(this.menuStripMain, "menuStripMain");
             this.menuStripMain.Name = "menuStripMain";
             // 
@@ -182,6 +192,13 @@
             resources.ApplyResources(this.toolStripMenuAbout, "toolStripMenuAbout");
             this.toolStripMenuAbout.Click += new System.EventHandler(this.toolStripMenuAbout_Click);
             // 
+            // toolStripMenuTopMost
+            // 
+            this.toolStripMenuTopMost.CheckOnClick = true;
+            this.toolStripMenuTopMost.Name = "toolStripMenuTopMost";
+            this.toolStripMenuTopMost.Text = "窗口始终置顶";
+            this.toolStripMenuTopMost.Click += new System.EventHandler(this.toolStripMenuTopMost_Click);
+            // 
             // Recursive
             // 
             resources.ApplyResources(this.Recursive, "Recursive");
@@ -197,6 +214,7 @@
             this.Controls.Add(this.FastMode);
             this.Controls.Add(this.generateModeBox);
             this.Controls.Add(this.progressBar);
+            this.Controls.Add(this.GalleryButton);
             this.Controls.Add(this.StartButton);
             this.Controls.Add(this.MsgLabel);
             this.Controls.Add(this.PathLabel);
@@ -224,6 +242,7 @@
 
         private System.Windows.Forms.ProgressBar progressBar;
         private System.Windows.Forms.Button StartButton;
+        private System.Windows.Forms.Button GalleryButton;
         private System.Windows.Forms.Label MsgLabel;
         private System.Windows.Forms.Label PathLabel;
         private System.Windows.Forms.PictureBox FolderImg;
@@ -242,7 +261,7 @@
         private System.Windows.Forms.ToolStripMenuItem languageToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem englishToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem chineseToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuTopMost;
         private System.Windows.Forms.CheckBox Recursive;
     }
 }
-

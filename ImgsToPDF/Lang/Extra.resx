@@ -138,4 +138,10 @@
   <data name="strSingle" xml:space="preserve">
     <value>Single</value>
   </data>
+  <data name="strGallerySelected" xml:space="preserve">
+    <value>Selected {0} images.</value>
+  </data>
+  <data name="strNoValidSelection" xml:space="preserve">
+    <value>No valid images were found in your selection.</value>
+  </data>
 </root>

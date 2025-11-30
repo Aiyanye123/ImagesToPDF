@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="$this.Text" xml:space="preserve">
+    <value>浏览/筛选</value>
+  </data>
+  <data name="applyFilterButton.Text" xml:space="preserve">
+    <value>应用筛选</value>
+  </data>
+  <data name="cancelButton.Text" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="confirmButton.Tag" xml:space="preserve">
+    <value>将生成 {0} 张图片，继续？</value>
+  </data>
+  <data name="confirmButton.Text" xml:space="preserve">
+    <value>确定</value>
+  </data>
+  <data name="extensionLabel.Text" xml:space="preserve">
+    <value>扩展名</value>
+  </data>
+  <data name="extensionsClearButton.Text" xml:space="preserve">
+    <value>全不选</value>
+  </data>
+  <data name="extensionsSelectAllButton.Text" xml:space="preserve">
+    <value>全选扩展</value>
+  </data>
+  <data name="loadingLabel.Text" xml:space="preserve">
+    <value>正在读取图片...</value>
+  </data>
+  <data name="maxRatioLabel.Text" xml:space="preserve">
+    <value>最大长宽比</value>
+  </data>
+  <data name="minHeightLabel.Text" xml:space="preserve">
+    <value>最小高度</value>
+  </data>
+  <data name="minRatioLabel.Text" xml:space="preserve">
+    <value>最小长宽比</value>
+  </data>
+  <data name="minWidthLabel.Text" xml:space="preserve">
+    <value>最小宽度</value>
+  </data>
+  <data name="noSelectionLabel.Text" xml:space="preserve">
+    <value>请至少选择一张图片。</value>
+  </data>
+  <data name="resetZoomButton.Text" xml:space="preserve">
+    <value>重置缩放</value>
+  </data>
+  <data name="selectAllButton.Text" xml:space="preserve">
+    <value>全选可见</value>
+  </data>
+  <data name="selectNoneButton.Text" xml:space="preserve">
+    <value>清空可见</value>
+  </data>
+  <data name="selectionStatusLabel.Text" xml:space="preserve">
+    <value>已选 {0} / 总 {1}</value>
+  </data>
+</root>

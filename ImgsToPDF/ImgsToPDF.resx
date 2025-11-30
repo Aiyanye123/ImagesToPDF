@@ -170,6 +170,33 @@
   <data name="&gt;&gt;StartButton.ZOrder" xml:space="preserve">
     <value>4</value>
   </data>
+  <data name="GalleryButton.Enabled" type="System.Boolean, mscorlib">
+    <value>False</value>
+  </data>
+  <data name="GalleryButton.Location" type="System.Drawing.Point, System.Drawing">
+    <value>455, 503</value>
+  </data>
+  <data name="GalleryButton.Size" type="System.Drawing.Size, System.Drawing">
+    <value>88, 32</value>
+  </data>
+  <data name="GalleryButton.TabIndex" type="System.Int32, mscorlib">
+    <value>11</value>
+  </data>
+  <data name="GalleryButton.Text" xml:space="preserve">
+    <value>Browse/Filter</value>
+  </data>
+  <data name="&gt;&gt;GalleryButton.Name" xml:space="preserve">
+    <value>GalleryButton</value>
+  </data>
+  <data name="&gt;&gt;GalleryButton.Type" xml:space="preserve">
+    <value>System.Windows.Forms.Button, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;GalleryButton.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;GalleryButton.ZOrder" xml:space="preserve">
+    <value>4</value>
+  </data>
   <data name="MsgLabel.Location" type="System.Drawing.Point, System.Drawing">
     <value>155, 420</value>
   </data>
