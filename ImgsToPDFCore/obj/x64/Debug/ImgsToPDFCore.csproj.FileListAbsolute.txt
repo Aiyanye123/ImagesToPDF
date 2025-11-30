@@ -1,0 +1,2 @@
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDFCore\obj\x64\Debug\ImgsToPDFCore.csproj.AssemblyReference.cache
+D:\DaiMa\C#\ImagesToPDF-master\ImgsToPDFCore\obj\x64\Debug\ImgsToPDFCore.csproj.CoreCompileInputs.cache

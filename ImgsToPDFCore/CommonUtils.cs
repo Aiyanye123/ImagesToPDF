@@ -10,6 +10,19 @@ namespace ImgsToPDFCore
 {
     internal class CommonUtils
     {
+        /// <summary>
+        /// Normalize to full path and add long-path prefix to avoid MAX_PATH errors.
+        /// </summary>
+        internal static string ToLongPath(string path) {
+            if (string.IsNullOrWhiteSpace(path)) { return path; }
+            var fullPath = Path.GetFullPath(path);
+            if (fullPath.StartsWith(@"\\?\")) { return fullPath; }
+            if (fullPath.StartsWith(@"\\", StringComparison.Ordinal)) {
+                return @"\\?\UNC\" + fullPath.Substring(2);
+            }
+            return @"\\?\" + fullPath;
+        }
+
         private static bool ExtraArchive(IArchive archive, string outFileDirectory) {
             if (!archive.Entries.Any()) { return false; }
             Directory.CreateDirectory(outFileDirectory);

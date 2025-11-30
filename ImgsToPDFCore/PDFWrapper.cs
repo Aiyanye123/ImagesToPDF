@@ -1,4 +1,4 @@
-﻿using iTextSharp.text;
+using iTextSharp.text;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -18,8 +18,8 @@ namespace ImgsToPDFCore {
             if (fastFlag) {
                 resultImage = iTextSharp.text.Image.GetInstance(bitmap, System.Drawing.Imaging.ImageFormat.Jpeg);
             }
-            // webp直接转为bmp写，否则报错；其他的按读入的格式写
             else if (bitmap.RawFormat.Equals(System.Drawing.Imaging.ImageFormat.MemoryBmp)) {
+                // webp 直接转为 bmp 写入格式，否则报错，强制按格式写
                 resultImage = iTextSharp.text.Image.GetInstance(bitmap, System.Drawing.Imaging.ImageFormat.Bmp);
             }
             else {
@@ -27,9 +27,24 @@ namespace ImgsToPDFCore {
             }
             return resultImage;
         }
+
+        static Bitmap LoadBitmap(string imagePath) {
+            var fileExt = Path.GetExtension(imagePath)?.ToLower();
+            try {
+                if (fileExt == ".webp") {
+                    using (WebP webp = new WebP()) {
+                        return webp.Load(imagePath);
+                    }
+                }
+                return Bitmap.FromFile(imagePath) as Bitmap;
+            }
+            catch (Exception) {
+                return null;
+            }
+        }
+
         static void AddPage(Document document, Bitmap bitmap, bool fastFlag) {
             iTextSharp.text.Rectangle pageSize;
-            //Console.WriteLine(luaConfig.PageSizeToSave.Width);
             if (CSGlobal.luaConfig.PageSizeToSave != null) {
                 pageSize = CSGlobal.luaConfig.PageSizeToSave;
             }
@@ -47,105 +62,94 @@ namespace ImgsToPDFCore {
             document.NewPage();
             document.PageCount = document.PageNumber + 1;
             document.Add(image);
-            bitmap.Dispose();   // 释放位图占用资源
+            bitmap.Dispose();   // 释放位图占用的资源
         }
+
         static Bitmap CombineBitmap(Bitmap bm1, Bitmap bm2, int margin) {
             var width = bm1.Width + bm2.Width + margin;
             var height = Math.Max(bm1.Height, bm2.Height);
-            // 初始化画布(最终的拼图画布)并设置宽高
             Bitmap bitMap = new Bitmap(width, height);
-            // 初始化画板
             Graphics canavas = Graphics.FromImage(bitMap);
-            // 将画布涂为白色(底部颜色可自行设置)
             canavas.FillRectangle(Brushes.White, new System.Drawing.Rectangle(0, 0, width, height));
-            //在x=0，y=0处画上图一
             canavas.DrawImage(bm1, 0, 0, bm1.Width, bm1.Height);
-            //在x=0，y在图一往下10像素处画上图二
             canavas.DrawImage(bm2, bm1.Width + margin, 0, bm2.Width, bm2.Height);
             bm1.Dispose();
             bm2.Dispose();
             return bitMap;
         }
-        static void ImagesToPdf(List<Bitmap> imageList, Layout layout = Layout.Single, bool fastFlag = false) {
-            using (var ms = new MemoryStream()) {
+
+        static void ImagesToPdf(IEnumerable<string> imagePaths, Layout layout = Layout.Single, bool fastFlag = false) {
+            string pathToSave = CommonUtils.ToLongPath(CSGlobal.luaConfig.PathToSave()); // 从lua里读设置的保存路径
+            using (var fs = new FileStream(pathToSave, FileMode.Create, FileAccess.Write, FileShare.Read)) {
                 var document = new iTextSharp.text.Document(iTextSharp.text.PageSize.A4, 0, 0, 0, 0);
-                iTextSharp.text.pdf.PdfWriter.GetInstance(document, ms).SetFullCompression();
+                iTextSharp.text.pdf.PdfWriter.GetInstance(document, fs).SetFullCompression();
                 document.Open();
+
                 if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
-                    // 如果layout flag为0，单页来写
-                    foreach (var imagePic in imageList) {
+                    foreach (var imagePath in imagePaths) {
+                        Bitmap imagePic = LoadBitmap(imagePath);
+                        if (imagePic == null) { continue; }
                         AddPage(document, imagePic, fastFlag);
                     }
                 }
                 else {
-                    for (int i = 0; i < imageList.Count; i++) {
-                        if (i + 1 >= imageList.Count || !(imageList[i].Height >= imageList[i].Width && imageList[i + 1].Height >= imageList[i + 1].Width)) {
-                            AddPage(document, imageList[i], fastFlag);
+                    Bitmap pending = null;
+                    foreach (var imagePath in imagePaths) {
+                        Bitmap current = LoadBitmap(imagePath);
+                        if (current == null) { continue; }
+                        if (pending == null) {
+                            pending = current;
+                            continue;
                         }
-                        else {   // 如果图片长大于宽且下一张也如此，把他们拼起来
-                            Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? imageList[i] : imageList[i + 1];
-                            Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? imageList[i + 1] : imageList[i];
+                        if (pending.Height >= pending.Width && current.Height >= current.Width) {
+                            Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? pending : current;
+                            Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? current : pending;
                             using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
                                 AddPage(document, combinedBitmap, fastFlag);
                             }
-                            imageList[i]?.Dispose();
-                            imageList[i + 1]?.Dispose();
-                            i++;
+                            pending = null;
+                        }
+                        else {
+                            AddPage(document, pending, fastFlag);
+                            AddPage(document, current, fastFlag);
+                            pending = null;
                         }
                     }
+                    if (pending != null) {
+                        AddPage(document, pending, fastFlag);
+                        pending = null;
+                    }
                 }
-                //Console.WriteLine(document.PageNumber);
-                // 如果零页，添加一页空页
+
                 if (document.PageNumber == 0) {
                     document.NewPage();
                     document.Add(iTextSharp.text.Chunk.NEWLINE);
                 }
                 document.Close();
-                string pathToSave = CSGlobal.luaConfig.PathToSave(); // 从lua里读设置的保存路径
-                File.WriteAllBytes(pathToSave, ms.ToArray());
             }
         }
-        /// <summary>
-        /// 将指定文件夹下的图片合并为PDF文件
-        /// </summary>
-        /// <param name="directoryPath">文件夹路径</param>
-        /// <param name="layout">合并方式</param>
-        /// <param name="fastFlag">是否以图片质量换取生成速度</param>
+
+        public static void ImagesToPDF(string[] imagePaths, Layout layout = Layout.Single, bool fastFlag = false) {
+            if (imagePaths == null) { return; }
+            var orderedPaths = imagePaths
+                .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                .OrderBy(p => p, new StringLenComparer())
+                .ToList();
+            if (!orderedPaths.Any()) { return; }
+            ImagesToPdf(orderedPaths, layout, fastFlag);
+        }
+
         public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, bool fastFlag = false) {
-            if (!Directory.Exists(directoryPath)) { return; }   // 不存在文件夹则直接结束执行
+            if (!Directory.Exists(directoryPath)) { return; }   // 如果不是文件夹，直接结束执行
             List<string> imageExtensions = new List<string> { ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg", ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp" };
             IEnumerable<string> imagepaths = Directory.EnumerateFiles(directoryPath)
                 .Where(p => imageExtensions.Any(e => Path.GetExtension(p)?.ToLower() == e))
                 .OrderBy(p => p, new StringLenComparer());
-            List<Bitmap> imageBitmapList = new List<Bitmap>();
-            foreach (var imagepath in imagepaths) {
-                var fileExt = Path.GetExtension(imagepath)?.ToLower();
-                Bitmap srcImage;
-                if (fileExt == ".webp") {
-                    // 读取webp文件的方法
-                    using (WebP webp = new WebP()) {
-                        srcImage = webp.Load(imagepath);
-                    }
-                }
-                else {
-                    try {
-                        srcImage = Bitmap.FromFile(imagepath) as Bitmap;
-                    }
-                    catch (Exception) {
-                        continue;
-                    }
-                }
-                if (srcImage != null) {
-                    imageBitmapList.Add(srcImage);
-                }
-            };
-            ImagesToPdf(imageBitmapList, layout, fastFlag);
-            foreach (Bitmap bitmap in imageBitmapList) {
-                bitmap?.Dispose();
-            }
+            ImagesToPdf(imagepaths, layout, fastFlag);
         }
+
         /// <summary>
-        /// 给文件名排序的方法，不使用默认的排序方法，在lua里重写
+        /// 文件名排序：默认使用 lua 配置中的自定义方法
         /// </summary>
         class StringLenComparer : IComparer<string> {
             int IComparer<string>.Compare(string x, string y) {

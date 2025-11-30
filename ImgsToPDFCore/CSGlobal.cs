@@ -17,6 +17,9 @@ internal struct CSGlobal {
         typeof(iTextSharp.text.Rectangle),
         typeof(Interaction),
         typeof(PDFWrapper),
+        typeof(IList<string>),
+        typeof(List<string>),
+        typeof(IEnumerable<string>),
     };
     #endregion
     public static IConfig luaConfig;

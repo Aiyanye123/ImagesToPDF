@@ -1,0 +1,74 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\DaiMa\\C#\\ImagesToPDF-master\\ImgsToPDFCore\\ImgsToPDFCore.csproj": {}
+  },
+  "projects": {
+    "D:\\DaiMa\\C#\\ImagesToPDF-master\\ImgsToPDFCore\\ImgsToPDFCore.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\DaiMa\\C#\\ImagesToPDF-master\\ImgsToPDFCore\\ImgsToPDFCore.csproj",
+        "projectName": "ImgsToPDFCore",
+        "projectPath": "D:\\DaiMa\\C#\\ImagesToPDF-master\\ImgsToPDFCore\\ImgsToPDFCore.csproj",
+        "packagesPath": "C:\\Users\\Aiyanye\\.nuget\\packages\\",
+        "outputPath": "D:\\DaiMa\\C#\\ImagesToPDF-master\\ImgsToPDFCore\\obj\\",
+        "projectStyle": "PackageReference",
+        "skipContentFileWrite": true,
+        "UsingMicrosoftNETSdk": false,
+        "configFilePaths": [
+          "C:\\Users\\Aiyanye\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "projectReferences": {}
+          }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net48": {
+          "dependencies": {
+            "CommandLineParser": {
+              "target": "Package",
+              "version": "[2.9.1, )"
+            },
+            "SharpCompress": {
+              "target": "Package",
+              "version": "[0.38.0, )"
+            },
+            "iTextSharp": {
+              "target": "Package",
+              "version": "[5.5.13.4, )"
+            }
+          }
+        }
+      },
+      "runtimes": {
+        "win": {
+          "#import": []
+        },
+        "win-arm64": {
+          "#import": []
+        },
+        "win-x64": {
+          "#import": []
+        },
+        "win-x86": {
+          "#import": []
+        }
+      }
+    }
+  }
+}
