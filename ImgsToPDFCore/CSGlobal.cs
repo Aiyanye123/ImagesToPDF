@@ -23,4 +23,5 @@ internal struct CSGlobal {
     };
     #endregion
     public static IConfig luaConfig;
+    public static bool UniformWidthScale = false;
 }

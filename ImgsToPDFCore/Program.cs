@@ -19,6 +19,9 @@ namespace ImgsToPDFCore {
 
             [Option("file-list", Required = false, HelpText = "ѡ�е�ͼƬ�б��ļ���·��")]
             public string FileList { get; set; }
+
+            [Option('u', "uniform-width", Required = false, HelpText = "统一宽度缩放（等比缩放，不裁剪）")]
+            public bool UniformWidthScale { get; set; }
         }
         static void Main(string[] args) {
             //for (int i = 0; i < args.Length; i++) {
@@ -41,6 +44,7 @@ namespace ImgsToPDFCore {
             CSGlobal.luaEnv.DoString(@"config = require 'config';"); // ��ȡlua�ڵķ���
 
             CSGlobal.luaConfig = CSGlobal.luaEnv.Global.Get<IConfig>("config");
+            CSGlobal.UniformWidthScale = option.UniformWidthScale;
             try {
                 CSGlobal.luaConfig.PreProcess(option.DirectoryPath, option.Layout, option.FastFlag, option.FileList);
             }

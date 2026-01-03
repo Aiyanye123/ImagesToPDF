@@ -43,26 +43,104 @@ namespace ImgsToPDFCore {
             }
         }
 
-        static void AddPage(Document document, Bitmap bitmap, bool fastFlag) {
-            iTextSharp.text.Rectangle pageSize;
-            if (CSGlobal.luaConfig.PageSizeToSave != null) {
-                pageSize = CSGlobal.luaConfig.PageSizeToSave;
+        static void AddPage(Document document, Bitmap bitmap, bool fastFlag, float? uniformWidth) {
+            var configuredPageSize = CSGlobal.luaConfig.PageSizeToSave;
+            bool useFixedPageSize = configuredPageSize != null
+                && configuredPageSize.Width > 0
+                && configuredPageSize.Height > 0;
+
+            if (uniformWidth.HasValue && uniformWidth.Value > 0) {
+                var targetWidth = useFixedPageSize ? configuredPageSize.Width : uniformWidth.Value;
+                var scale = targetWidth / bitmap.Width;
+                var targetHeight = bitmap.Height * scale;
+                var uniformPageSize = new iTextSharp.text.Rectangle(0, 0, targetWidth, targetHeight);
+                document.SetPageSize(uniformPageSize);
+                document.SetMargins(0, 0, 0, 0);
+                var image = GetImageInstance(bitmap, fastFlag);
+                image.ScaleAbsolute(uniformPageSize.Width, uniformPageSize.Height);
+                image.SetAbsolutePosition(0, 0);
+                document.NewPage();
+                document.PageCount = document.PageNumber + 1;
+                document.Add(image);
+                bitmap.Dispose();
+                return;
             }
-            else {
-                pageSize = new iTextSharp.text.Rectangle(0, 0, bitmap.Width, bitmap.Height);
-            }
+
+            iTextSharp.text.Rectangle pageSize = useFixedPageSize
+                ? configuredPageSize
+                : new iTextSharp.text.Rectangle(0, 0, bitmap.Width, bitmap.Height);
+
             document.SetPageSize(pageSize);
-            var image = GetImageInstance(bitmap, fastFlag);
-            if (CSGlobal.luaConfig.PageSizeToSave != null) {
-                image.ScaleToFit(pageSize.Width, pageSize.Height);
-                var wMargins = (pageSize.Width - image.ScaledWidth) / 2;
-                var hMargins = (pageSize.Height - image.ScaledHeight) / 2;
+            var resultImage = GetImageInstance(bitmap, fastFlag);
+
+            if (useFixedPageSize) {
+                resultImage.ScaleToFit(pageSize.Width, pageSize.Height);
+                var wMargins = (pageSize.Width - resultImage.ScaledWidth) / 2;
+                var hMargins = (pageSize.Height - resultImage.ScaledHeight) / 2;
                 document.SetMargins(wMargins, wMargins, hMargins, hMargins);
             }
+            else {
+                document.SetMargins(0, 0, 0, 0);
+                resultImage.ScaleAbsolute(pageSize.Width, pageSize.Height);
+                resultImage.SetAbsolutePosition(0, 0);
+            }
+
             document.NewPage();
             document.PageCount = document.PageNumber + 1;
-            document.Add(image);
+            document.Add(resultImage);
             bitmap.Dispose();   // 释放位图占用的资源
+        }
+
+        static float GetUniformTargetWidth(IEnumerable<string> imagePaths, Layout layout) {
+            const int duplexMargin = 10;
+            float maxWidth = 0;
+            if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
+                foreach (var imagePath in imagePaths) {
+                    using (var imagePic = LoadBitmap(imagePath)) {
+                        if (imagePic == null) { continue; }
+                        if (imagePic.Width > maxWidth) {
+                            maxWidth = imagePic.Width;
+                        }
+                    }
+                }
+                return maxWidth;
+            }
+
+            int pendingWidth = 0;
+            int pendingHeight = 0;
+            foreach (var imagePath in imagePaths) {
+                using (var current = LoadBitmap(imagePath)) {
+                    if (current == null) { continue; }
+                    if (pendingWidth == 0) {
+                        pendingWidth = current.Width;
+                        pendingHeight = current.Height;
+                        continue;
+                    }
+
+                    bool pendingPortrait = pendingHeight >= pendingWidth;
+                    bool currentPortrait = current.Height >= current.Width;
+                    if (pendingPortrait && currentPortrait) {
+                        var combinedWidth = pendingWidth + current.Width + duplexMargin;
+                        if (combinedWidth > maxWidth) {
+                            maxWidth = combinedWidth;
+                        }
+                    }
+                    else {
+                        if (pendingWidth > maxWidth) {
+                            maxWidth = pendingWidth;
+                        }
+                        if (current.Width > maxWidth) {
+                            maxWidth = current.Width;
+                        }
+                    }
+                    pendingWidth = 0;
+                    pendingHeight = 0;
+                }
+            }
+            if (pendingWidth > maxWidth) {
+                maxWidth = pendingWidth;
+            }
+            return maxWidth;
         }
 
         static Bitmap CombineBitmap(Bitmap bm1, Bitmap bm2, int margin) {
@@ -85,11 +163,16 @@ namespace ImgsToPDFCore {
                 iTextSharp.text.pdf.PdfWriter.GetInstance(document, fs).SetFullCompression();
                 document.Open();
 
+                float? uniformWidth = null;
+                if (CSGlobal.UniformWidthScale) {
+                    uniformWidth = GetUniformTargetWidth(imagePaths, layout);
+                }
+
                 if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
                     foreach (var imagePath in imagePaths) {
                         Bitmap imagePic = LoadBitmap(imagePath);
                         if (imagePic == null) { continue; }
-                        AddPage(document, imagePic, fastFlag);
+                        AddPage(document, imagePic, fastFlag, uniformWidth);
                     }
                 }
                 else {
@@ -105,18 +188,18 @@ namespace ImgsToPDFCore {
                             Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? pending : current;
                             Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? current : pending;
                             using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
-                                AddPage(document, combinedBitmap, fastFlag);
+                                AddPage(document, combinedBitmap, fastFlag, uniformWidth);
                             }
                             pending = null;
                         }
                         else {
-                            AddPage(document, pending, fastFlag);
-                            AddPage(document, current, fastFlag);
+                            AddPage(document, pending, fastFlag, uniformWidth);
+                            AddPage(document, current, fastFlag, uniformWidth);
                             pending = null;
                         }
                     }
                     if (pending != null) {
-                        AddPage(document, pending, fastFlag);
+                        AddPage(document, pending, fastFlag, uniformWidth);
                         pending = null;
                     }
                 }
