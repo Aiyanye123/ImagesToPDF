@@ -141,13 +141,13 @@ namespace ImgsToPDF
                     }
                     tempFileListPath = Path.Combine(Path.GetTempPath(), $"ImgsToPDF_selected_{Guid.NewGuid():N}.txt");
                     File.WriteAllLines(tempFileListPath, validSelections);
-                    string[] args = FastMode.Checked ? new string[] {
-                        "--file-list", tempFileListPath,
-                        "-l", generateModeBox.SelectedIndex.ToString(), "--fast"
-                    } : new string[] {
+                    List<string> argsList = new List<string> {
                         "--file-list", tempFileListPath,
                         "-l", generateModeBox.SelectedIndex.ToString()
                     };
+                    if (FastMode.Checked) { argsList.Add("--fast"); }
+                    if (UniformWidth.Checked) { argsList.Add("--uniform-width"); }
+                    string[] args = argsList.ToArray();
                     var (_, stderr) = RunProcess(fileName, args);
                     if (stderr.Length > 0) {
                         MessageBox.Show(stderr);
@@ -157,13 +157,13 @@ namespace ImgsToPDF
 
                 if (Recursive.Checked && Directory.Exists(PathLabel.Text)) {
                     RecursiveFolder(PathLabel.Text, new List<string> { }).AsParallel().WithDegreeOfParallelism(4).ForAll(dirPath => {
-                        string[] args = FastMode.Checked ? new string[] {
-                            "-d", dirPath,
-                            "-l", generateModeBox.SelectedIndex.ToString(), "--fast"
-                        } : new string[] {
+                        List<string> argsList = new List<string> {
                             "-d", dirPath,
                             "-l", generateModeBox.SelectedIndex.ToString()
                         };
+                        if (FastMode.Checked) { argsList.Add("--fast"); }
+                        if (UniformWidth.Checked) { argsList.Add("--uniform-width"); }
+                        string[] args = argsList.ToArray();
                         var (_, stderr) = RunProcess(fileName, args);
                         if (stderr.Length > 0) {
                             MessageBox.Show(stderr);
@@ -171,13 +171,13 @@ namespace ImgsToPDF
                     });
                 }
                 else {
-                    string[] args = FastMode.Checked ? new string[] {
-                        "-d", PathLabel.Text,
-                        "-l", generateModeBox.SelectedIndex.ToString(), "--fast"
-                    } : new string[] {
+                    List<string> argsList = new List<string> {
                         "-d", PathLabel.Text,
                         "-l", generateModeBox.SelectedIndex.ToString()
                     };
+                    if (FastMode.Checked) { argsList.Add("--fast"); }
+                    if (UniformWidth.Checked) { argsList.Add("--uniform-width"); }
+                    string[] args = argsList.ToArray();
                     var (_, stderr) = RunProcess(fileName, args);
                     if (stderr.Length > 0) {
                         MessageBox.Show(stderr);

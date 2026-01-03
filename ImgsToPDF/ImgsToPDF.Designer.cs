@@ -35,6 +35,7 @@
             this.generateModeBox = new System.Windows.Forms.ComboBox();
             this.labelLayout = new System.Windows.Forms.Label();
             this.FastMode = new System.Windows.Forms.CheckBox();
+            this.UniformWidth = new System.Windows.Forms.CheckBox();
             this.menuStripMain = new System.Windows.Forms.MenuStrip();
             this.toolStripMenuFile = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuOpenFolder = new System.Windows.Forms.ToolStripMenuItem();
@@ -113,6 +114,12 @@
             resources.ApplyResources(this.FastMode, "FastMode");
             this.FastMode.Name = "FastMode";
             this.FastMode.UseVisualStyleBackColor = true;
+            // 
+            // UniformWidth
+            // 
+            resources.ApplyResources(this.UniformWidth, "UniformWidth");
+            this.UniformWidth.Name = "UniformWidth";
+            this.UniformWidth.UseVisualStyleBackColor = true;
             // 
             // menuStripMain
             // 
@@ -211,6 +218,7 @@
             resources.ApplyResources(this, "$this");
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.Recursive);
+            this.Controls.Add(this.UniformWidth);
             this.Controls.Add(this.FastMode);
             this.Controls.Add(this.generateModeBox);
             this.Controls.Add(this.progressBar);
@@ -250,6 +258,7 @@
         private System.Windows.Forms.ComboBox generateModeBox;
         private System.Windows.Forms.Label labelLayout;
         private System.Windows.Forms.CheckBox FastMode;
+        private System.Windows.Forms.CheckBox UniformWidth;
         private System.Windows.Forms.MenuStrip menuStripMain;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuFile;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuOpenFolder;

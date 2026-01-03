@@ -136,6 +136,15 @@
   <data name="FastMode.Text" xml:space="preserve">
     <value>有损(更小文件更快生成速度)</value>
   </data>
+  <data name="UniformWidth.Location" type="System.Drawing.Point, System.Drawing">
+    <value>330, 470</value>
+  </data>
+  <data name="UniformWidth.Size" type="System.Drawing.Size, System.Drawing">
+    <value>160, 22</value>
+  </data>
+  <data name="UniformWidth.Text" xml:space="preserve">
+    <value>统一宽度缩放</value>
+  </data>
   <data name="menuStripMain.Size" type="System.Drawing.Size, System.Drawing">
     <value>803, 32</value>
   </data>
@@ -197,7 +206,7 @@
     <value>关于(&amp;A)</value>
   </data>
   <data name="Recursive.Location" type="System.Drawing.Point, System.Drawing">
-    <value>294, 470</value>
+    <value>520, 470</value>
   </data>
   <data name="Recursive.Size" type="System.Drawing.Size, System.Drawing">
     <value>142, 22</value>
