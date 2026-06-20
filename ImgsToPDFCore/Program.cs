@@ -5,34 +5,34 @@ using XLua;
 namespace ImgsToPDFCore {
     internal class Program {
         /// <summary>
-        /// ��������������в�������
+        /// Command-line options.
         /// </summary>
         class Options {
-            [Option('d', "dir-path", Required = false, HelpText = "ͼƬ���ڵ��ļ���·����")]
+            [Option('d', "dir-path", Required = false, HelpText = "图片所在的文件夹路径")]
             public string DirectoryPath { get; set; }
 
-            [Option('l', "layout", Required = false, HelpText = "ҳ�沼�֣�0Ϊ��ҳ�����1Ϊ˫ҳ�����ң�2Ϊ˫ҳ������")]
+            [Option('l', "layout", Required = false, HelpText = "页面布局：0 单页，1 双页从左到右，2 双页从右到左")]
             public Layout Layout { get; set; }
 
-            [Option('f', "fast", Required = false, HelpText = "�Ƿ�������ͼƬ������ȡ�����ٶȡ�")]
+            [Option('f', "fast", Required = false, HelpText = "是否压缩图片以加快读取速度")]
             public bool FastFlag { get; set; }
 
-            [Option("file-list", Required = false, HelpText = "ѡ�е�ͼƬ�б��ļ���·��")]
+            [Option('q', "quality", Required = false, Default = 80, HelpText = "JPEG质量：70/80/90，0 表示原图无损")]
+            public int Quality { get; set; }
+
+            [Option("file-list", Required = false, HelpText = "选中的图片列表文件路径")]
             public string FileList { get; set; }
 
             [Option('u', "uniform-width", Required = false, HelpText = "统一宽度缩放（等比缩放，不裁剪）")]
             public bool UniformWidthScale { get; set; }
         }
         static void Main(string[] args) {
-            //for (int i = 0; i < args.Length; i++) {
-            //    Console.WriteLine(i + " " + args[i]);
-            //}
             Parser.Default.ParseArguments<Options>(args).WithParsed(Run);
         }
         /// <summary>
-        /// ʹ�ý�����������в������в�����
+        /// Runs with parsed command-line options.
         /// </summary>
-        /// <param name="option">������Ĳ���</param>
+        /// <param name="option">Parsed options.</param>
         static void Run(Options option) {
             if (string.IsNullOrWhiteSpace(option.DirectoryPath) && string.IsNullOrWhiteSpace(option.FileList)) {
                 Console.Error.WriteLine("No directory or file list provided.");
@@ -41,12 +41,19 @@ namespace ImgsToPDFCore {
             CSGlobal.luaEnv.AddBuildin("ffi", XLua.LuaDLL.Lua.LoadFFI);
             CSGlobal.luaEnv.AddBuildin("lfs", XLua.LuaDLL.Lua.LoadLFS);
 
-            CSGlobal.luaEnv.DoString(@"config = require 'config';"); // ��ȡlua�ڵķ���
+            CSGlobal.luaEnv.DoString(@"config = require 'config';");
 
             CSGlobal.luaConfig = CSGlobal.luaEnv.Global.Get<IConfig>("config");
             CSGlobal.UniformWidthScale = option.UniformWidthScale;
             try {
-                CSGlobal.luaConfig.PreProcess(option.DirectoryPath, option.Layout, option.FastFlag, option.FileList);
+                int quality = option.FastFlag ? 70 : option.Quality;
+                if (quality != 0 && quality != 70 && quality != 80 && quality != 90) {
+                    quality = 80;
+                }
+                if (quality == 0) {
+                    quality = PDFWrapper.OriginalQuality;
+                }
+                CSGlobal.luaConfig.PreProcess(option.DirectoryPath, option.Layout, quality, option.FileList);
             }
             catch (Exception ex) {
                 Console.Error.WriteLine(ex);

@@ -1,9 +1,11 @@
-using iTextSharp.text;
+using ImgsToPDF.Shared;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using WebPWrapper;
 
 namespace ImgsToPDFCore {
@@ -13,19 +15,85 @@ namespace ImgsToPDFCore {
         DuplexRightToLeft
     }
     internal class PDFWrapper {
-        static iTextSharp.text.Image GetImageInstance(Bitmap bitmap, bool fastFlag) {
-            iTextSharp.text.Image resultImage;
-            if (fastFlag) {
-                resultImage = iTextSharp.text.Image.GetInstance(bitmap, System.Drawing.Imaging.ImageFormat.Jpeg);
+        public const int OriginalQuality = -1;
+        private const int DefaultJpegQuality = 80;
+
+        static iTextSharp.text.Image GetImageInstance(Bitmap bitmap, int jpegQuality) {
+            bool hasAlpha = HasTransparency(bitmap);
+            if (jpegQuality != OriginalQuality) {
+                return hasAlpha
+                    ? iTextSharp.text.Image.GetInstance(ToPngBytes(bitmap))
+                    : iTextSharp.text.Image.GetInstance(ToJpegBytes(bitmap, jpegQuality));
             }
-            else if (bitmap.RawFormat.Equals(System.Drawing.Imaging.ImageFormat.MemoryBmp)) {
-                // webp 直接转为 bmp 写入格式，否则报错，强制按格式写
-                resultImage = iTextSharp.text.Image.GetInstance(bitmap, System.Drawing.Imaging.ImageFormat.Bmp);
+
+            if (bitmap.RawFormat.Equals(ImageFormat.MemoryBmp)) {
+                return iTextSharp.text.Image.GetInstance(ToPngBytes(bitmap));
             }
-            else {
-                resultImage = iTextSharp.text.Image.GetInstance(bitmap, bitmap.RawFormat);
+
+            return iTextSharp.text.Image.GetInstance(bitmap, bitmap.RawFormat);
+        }
+
+        static bool HasTransparency(Bitmap bitmap) {
+            if (!Image.IsAlphaPixelFormat(bitmap.PixelFormat)) {
+                return false;
             }
-            return resultImage;
+
+            if (bitmap.PixelFormat == PixelFormat.Format32bppArgb
+                || bitmap.PixelFormat == PixelFormat.Format32bppPArgb) {
+                var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+                var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+                try {
+                    if (data.Stride < 0) {
+                        return HasTransparencySlow(bitmap);
+                    }
+                    int stride = data.Stride;
+                    var pixels = new byte[stride * bitmap.Height];
+                    Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
+                    for (int y = 0; y < bitmap.Height; y++) {
+                        int row = y * stride;
+                        for (int x = 0; x < bitmap.Width; x++) {
+                            if (pixels[row + x * 4 + 3] < 255) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+                finally {
+                    bitmap.UnlockBits(data);
+                }
+            }
+
+            return HasTransparencySlow(bitmap);
+        }
+
+        static bool HasTransparencySlow(Bitmap bitmap) {
+            for (int y = 0; y < bitmap.Height; y++) {
+                for (int x = 0; x < bitmap.Width; x++) {
+                    if (bitmap.GetPixel(x, y).A < 255) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        static byte[] ToJpegBytes(Bitmap bitmap, int quality) {
+            quality = Math.Max(1, Math.Min(100, quality));
+            using (var stream = new MemoryStream())
+            using (var parameters = new EncoderParameters(1)) {
+                parameters.Param[0] = new EncoderParameter(Encoder.Quality, quality);
+                var codec = ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == ImageFormat.Jpeg.Guid);
+                bitmap.Save(stream, codec, parameters);
+                return stream.ToArray();
+            }
+        }
+
+        static byte[] ToPngBytes(Bitmap bitmap) {
+            using (var stream = new MemoryStream()) {
+                bitmap.Save(stream, ImageFormat.Png);
+                return stream.ToArray();
+            }
         }
 
         static Bitmap LoadBitmap(string imagePath) {
@@ -43,7 +111,7 @@ namespace ImgsToPDFCore {
             }
         }
 
-        static void AddPage(Document document, Bitmap bitmap, bool fastFlag, float? uniformWidth) {
+        static void AddPage(iTextSharp.text.Document document, Bitmap bitmap, int jpegQuality, float? uniformWidth) {
             var configuredPageSize = CSGlobal.luaConfig.PageSizeToSave;
             bool useFixedPageSize = configuredPageSize != null
                 && configuredPageSize.Width > 0
@@ -56,7 +124,7 @@ namespace ImgsToPDFCore {
                 var uniformPageSize = new iTextSharp.text.Rectangle(0, 0, targetWidth, targetHeight);
                 document.SetPageSize(uniformPageSize);
                 document.SetMargins(0, 0, 0, 0);
-                var image = GetImageInstance(bitmap, fastFlag);
+                var image = GetImageInstance(bitmap, jpegQuality);
                 image.ScaleAbsolute(uniformPageSize.Width, uniformPageSize.Height);
                 image.SetAbsolutePosition(0, 0);
                 document.NewPage();
@@ -71,7 +139,7 @@ namespace ImgsToPDFCore {
                 : new iTextSharp.text.Rectangle(0, 0, bitmap.Width, bitmap.Height);
 
             document.SetPageSize(pageSize);
-            var resultImage = GetImageInstance(bitmap, fastFlag);
+            var resultImage = GetImageInstance(bitmap, jpegQuality);
 
             if (useFixedPageSize) {
                 resultImage.ScaleToFit(pageSize.Width, pageSize.Height);
@@ -156,12 +224,14 @@ namespace ImgsToPDFCore {
             return bitMap;
         }
 
-        static void ImagesToPdf(IEnumerable<string> imagePaths, Layout layout = Layout.Single, bool fastFlag = false) {
+        static void ImagesToPdf(IEnumerable<string> imagePaths, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
             string pathToSave = CommonUtils.ToLongPath(CSGlobal.luaConfig.PathToSave()); // 从lua里读设置的保存路径
+            bool shouldDeleteOutput = false;
             using (var fs = new FileStream(pathToSave, FileMode.Create, FileAccess.Write, FileShare.Read)) {
                 var document = new iTextSharp.text.Document(iTextSharp.text.PageSize.A4, 0, 0, 0, 0);
                 iTextSharp.text.pdf.PdfWriter.GetInstance(document, fs).SetFullCompression();
                 document.Open();
+                bool hasImagePage = false;
 
                 float? uniformWidth = null;
                 if (CSGlobal.UniformWidthScale) {
@@ -172,7 +242,8 @@ namespace ImgsToPDFCore {
                     foreach (var imagePath in imagePaths) {
                         Bitmap imagePic = LoadBitmap(imagePath);
                         if (imagePic == null) { continue; }
-                        AddPage(document, imagePic, fastFlag, uniformWidth);
+                        AddPage(document, imagePic, jpegQuality, uniformWidth);
+                        hasImagePage = true;
                     }
                 }
                 else {
@@ -188,47 +259,60 @@ namespace ImgsToPDFCore {
                             Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? pending : current;
                             Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? current : pending;
                             using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
-                                AddPage(document, combinedBitmap, fastFlag, uniformWidth);
+                                AddPage(document, combinedBitmap, jpegQuality, uniformWidth);
+                                hasImagePage = true;
                             }
                             pending = null;
                         }
                         else {
-                            AddPage(document, pending, fastFlag, uniformWidth);
-                            AddPage(document, current, fastFlag, uniformWidth);
+                            AddPage(document, pending, jpegQuality, uniformWidth);
+                            AddPage(document, current, jpegQuality, uniformWidth);
+                            hasImagePage = true;
                             pending = null;
                         }
                     }
                     if (pending != null) {
-                        AddPage(document, pending, fastFlag, uniformWidth);
+                        AddPage(document, pending, jpegQuality, uniformWidth);
+                        hasImagePage = true;
                         pending = null;
                     }
                 }
 
-                if (document.PageNumber == 0) {
+                if (!hasImagePage) {
                     document.NewPage();
                     document.Add(iTextSharp.text.Chunk.NEWLINE);
+                    shouldDeleteOutput = true;
                 }
                 document.Close();
             }
+            if (shouldDeleteOutput && File.Exists(pathToSave)) {
+                try {
+                    File.Delete(pathToSave);
+                }
+                catch (Exception) {
+                    // Keep silent: empty PDF cleanup failure should not break main flow.
+                }
+            }
         }
 
-        public static void ImagesToPDF(string[] imagePaths, Layout layout = Layout.Single, bool fastFlag = false) {
+        public static void ImagesToPDF(string[] imagePaths, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
             if (imagePaths == null) { return; }
             var orderedPaths = imagePaths
                 .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p))
                 .OrderBy(p => p, new StringLenComparer())
                 .ToList();
             if (!orderedPaths.Any()) { return; }
-            ImagesToPdf(orderedPaths, layout, fastFlag);
+            ImagesToPdf(orderedPaths, layout, jpegQuality);
         }
 
-        public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, bool fastFlag = false) {
+        public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
             if (!Directory.Exists(directoryPath)) { return; }   // 如果不是文件夹，直接结束执行
-            List<string> imageExtensions = new List<string> { ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg", ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp" };
-            IEnumerable<string> imagepaths = Directory.EnumerateFiles(directoryPath)
-                .Where(p => imageExtensions.Any(e => Path.GetExtension(p)?.ToLower() == e))
-                .OrderBy(p => p, new StringLenComparer());
-            ImagesToPdf(imagepaths, layout, fastFlag);
+            var imagepaths = Directory.EnumerateFiles(directoryPath)
+                .Where(ImageFileExtensions.IsSupported)
+                .OrderBy(p => p, new StringLenComparer())
+                .ToList();
+            if (!imagepaths.Any()) { return; }
+            ImagesToPdf(imagepaths, layout, jpegQuality);
         }
 
         /// <summary>

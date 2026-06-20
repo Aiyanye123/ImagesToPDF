@@ -9,7 +9,7 @@ namespace ImgsToPDFCore {
         string PathToSave();
         iTextSharp.text.Rectangle PageSizeToSave { get; set; }
         int FilePathComparer(string a, string b);
-        void PreProcess(string directoryPath, Layout layout, bool fastFlag, string fileList);
+        void PreProcess(string directoryPath, Layout layout, int quality, string fileList);
         void PostProcess();
     }
 }
