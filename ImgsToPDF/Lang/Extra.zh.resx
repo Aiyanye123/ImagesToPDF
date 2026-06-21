@@ -85,4 +85,10 @@
   <data name="strNoValidSelection" xml:space="preserve">
     <value>所选内容中没有找到有效图片。</value>
   </data>
+  <data name="strTopMostOn" xml:space="preserve">
+    <value>窗口始终置顶（开）</value>
+  </data>
+  <data name="strTopMostOff" xml:space="preserve">
+    <value>窗口始终置顶（关）</value>
+  </data>
 </root>

@@ -144,4 +144,10 @@
   <data name="strNoValidSelection" xml:space="preserve">
     <value>No valid images were found in your selection.</value>
   </data>
+  <data name="strTopMostOn" xml:space="preserve">
+    <value>Always on top (On)</value>
+  </data>
+  <data name="strTopMostOff" xml:space="preserve">
+    <value>Always on top (Off)</value>
+  </data>
 </root>
