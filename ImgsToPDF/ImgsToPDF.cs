@@ -502,8 +502,8 @@ namespace ImgsToPDF
             qualityLabel.Text = isChinese ? "PDF质量:" : "PDF Quality:";
             qualityBox.Items.Clear();
             qualityBox.Items.AddRange(new object[] {
-                new PdfQualityOption(isChinese ? "快速 (70)" : "Fast (70)", 70),
-                new PdfQualityOption(isChinese ? "默认 (80)" : "Default (80)", 80),
+                new PdfQualityOption(isChinese ? "快速 (75)" : "Fast (75)", 75),
+                new PdfQualityOption(isChinese ? "默认 (85)" : "Default (85)", 85),
                 new PdfQualityOption(isChinese ? "高质量 (90)" : "High Quality (90)", 90),
                 new PdfQualityOption(isChinese ? "原图" : "Original", 0)
             });
@@ -517,7 +517,7 @@ namespace ImgsToPDF
         }
 
         private int GetSelectedQualityValue() {
-            return qualityBox?.SelectedItem is PdfQualityOption option ? option.Value : 80;
+            return qualityBox?.SelectedItem is PdfQualityOption option ? option.Value : 85;
         }
 
         private void SwitchLanguage(string languageName) {
