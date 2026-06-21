@@ -14,9 +14,6 @@ namespace ImgsToPDFCore {
             [Option('l', "layout", Required = false, HelpText = "页面布局：0 单页，1 双页从左到右，2 双页从右到左")]
             public Layout Layout { get; set; }
 
-            [Option('f', "fast", Required = false, HelpText = "是否压缩图片以加快读取速度")]
-            public bool FastFlag { get; set; }
-
             [Option('q', "quality", Required = false, Default = 85, HelpText = "JPEG质量：75/85/90，0 表示原图无损")]
             public int Quality { get; set; }
 
@@ -46,7 +43,7 @@ namespace ImgsToPDFCore {
             CSGlobal.luaConfig = CSGlobal.luaEnv.Global.Get<IConfig>("config");
             CSGlobal.UniformWidthScale = option.UniformWidthScale;
             try {
-                int quality = option.FastFlag ? 75 : option.Quality;
+                int quality = option.Quality;
                 if (quality != 0 && quality != 75 && quality != 85 && quality != 90) {
                     quality = 85;
                 }
