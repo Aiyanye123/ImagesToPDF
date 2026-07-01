@@ -121,7 +121,7 @@
     <value>开始</value>
   </data>
   <data name="GalleryButton.Text" xml:space="preserve">
-    <value>浏览/筛选</value>
+    <value>专业整理</value>
   </data>
   <data name="MsgLabel.Text" xml:space="preserve">
     <value>拖入包含图片的文件夹</value>

@@ -64,11 +64,17 @@
     <Compile Include="..\ImgsToPDFCore\ImageFileExtensions.cs">
       <Link>ImageFileExtensions.cs</Link>
     </Compile>
+    <Compile Include="..\ImgsToPDFCore\PageManifest.cs">
+      <Link>PageManifest.cs</Link>
+    </Compile>
     <Compile Include="GalleryForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="GalleryForm.Designer.cs">
       <DependentUpon>GalleryForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="CropForm.cs">
+      <SubType>Form</SubType>
     </Compile>
     <Compile Include="ImgsToPDF.cs">
       <SubType>Form</SubType>

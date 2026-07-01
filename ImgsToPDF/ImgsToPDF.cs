@@ -18,7 +18,7 @@ namespace ImgsToPDF
 {
     public partial class ImgsToPDF : Form
     {
-        private List<string> selectedImages = new List<string>();
+        private List<PageEdit> organizedPages = new List<PageEdit>();
         private readonly List<string> pathQueue = new List<string>();
         private int queueIndex = -1;
         private readonly Button previousQueueButton = new Button();
@@ -147,7 +147,7 @@ namespace ImgsToPDF
             PicInFolder.Image = Properties.Resources.folder;
             FolderImg.Image = null;
             PathLabel.Text = null;
-            selectedImages.Clear();
+            organizedPages.Clear();
             GalleryButton.Enabled = false;
             StartButton.Enabled = false;
             MsgLabel.Text = Extra.ApplyResource(this.GetType(), "MsgLabel.Text");
@@ -208,7 +208,7 @@ namespace ImgsToPDF
             ReleaseOwnedPreviewImage();
 
             PathLabel.Text = directoryPath;
-            selectedImages.Clear();
+            organizedPages.Clear();
             GalleryButton.Enabled = false;
 
             // Validate the selected path.
@@ -308,21 +308,28 @@ namespace ImgsToPDF
         }
         private bool ButtonClickAction(string pathToProcess) {
             var fileName = AppDomain.CurrentDomain.BaseDirectory + @"\Core\ImgsToPDFCore.exe";
-            string tempFileListPath = null;
+            string tempManifestPath = null;
             try {
-                if (selectedImages.Any()) {
-                    var validSelections = selectedImages
-                        .Where(File.Exists)
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                if (organizedPages.Any()) {
+                    var selectedPages = organizedPages.Where(page => page.IsSelected).ToList();
+                    PageEdit missingPage = selectedPages.FirstOrDefault(page => !File.Exists(page.Path));
+                    if (missingPage != null) {
+                        MessageBox.Show($"Source image was not found:\n{missingPage.Path}");
+                        return false;
+                    }
+                    var validSelections = selectedPages
+                        .GroupBy(page => page.Path, StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.First().Clone())
                         .ToList();
                     if (validSelections.Count == 0) {
                         MessageBox.Show(Extra.ApplyResource(typeof(Extra), "strNoValidSelection"));
                         return false;
                     }
-                    tempFileListPath = Path.Combine(Path.GetTempPath(), $"ImgsToPDF_selected_{Guid.NewGuid():N}.txt");
-                    File.WriteAllLines(tempFileListPath, validSelections);
+                    tempManifestPath = Path.Combine(Path.GetTempPath(), $"ImgsToPDF_pages_{Guid.NewGuid():N}.txt");
+                    PageManifest.Write(tempManifestPath, validSelections);
                     List<string> argsList = new List<string> {
-                        "--file-list", tempFileListPath,
+                        "--dir-path", pathToProcess,
+                        "--page-manifest", tempManifestPath,
                         "-l", generateModeBox.SelectedIndex.ToString(),
                         "--quality", GetSelectedQualityValue().ToString()
                     };
@@ -367,10 +374,14 @@ namespace ImgsToPDF
                 }
                 return true;
             }
+            catch (Exception ex) {
+                MessageBox.Show(ex.Message);
+                return false;
+            }
             finally {
-                if (tempFileListPath != null && File.Exists(tempFileListPath)) {
+                if (tempManifestPath != null && File.Exists(tempManifestPath)) {
                     try {
-                        File.Delete(tempFileListPath);
+                        File.Delete(tempManifestPath);
                     }
                     catch (Exception) {
                         // ignore cleanup errors
@@ -406,12 +417,28 @@ namespace ImgsToPDF
             if (!Directory.Exists(PathLabel.Text)) {
                 return;
             }
-            using (var galleryForm = new GalleryForm(PathLabel.Text)) {
+            using (var galleryForm = new GalleryForm(PathLabel.Text, organizedPages, generateModeBox.SelectedIndex)) {
                 var result = galleryForm.ShowDialog(this);
                 if (result == DialogResult.OK) {
-                    selectedImages = galleryForm.SelectedFiles;
-                    MsgLabel.Text = string.Format(Extra.ApplyResource(typeof(Extra), "strGallerySelected"), selectedImages.Count);
+                    organizedPages = galleryForm.SelectedPages;
+                    generateModeBox.SelectedIndex = galleryForm.SelectedLayout;
+                    MsgLabel.Text = string.Format(Extra.ApplyResource(typeof(Extra), "strGallerySelected"), organizedPages.Count(page => page.IsSelected));
+                    RefreshOrganizedPreview();
                 }
+            }
+        }
+
+        private void RefreshOrganizedPreview() {
+            PageEdit previewPage = organizedPages.FirstOrDefault(page => page.IsSelected && page.IsCover)
+                ?? organizedPages.FirstOrDefault(page => page.IsSelected);
+            if (previewPage == null || !File.Exists(previewPage.Path)) { return; }
+            ReleaseOwnedPreviewImage();
+            try {
+                ownedPreviewImage = LoadPreviewBitmap(previewPage.Path);
+                PicInFolder.Image = ownedPreviewImage;
+            }
+            catch (Exception) {
+                PicInFolder.Image = Properties.Resources.no_photo;
             }
         }
         private void toolStripMenuExit_Click(object sender, EventArgs e) {
@@ -546,8 +573,8 @@ namespace ImgsToPDF
             UpdateTopMostMenuStyle();
             AdjustMainActionButtonsLayout();
 
-            if (selectedImages.Any()) {
-                MsgLabel.Text = string.Format(Extra.ApplyResource(typeof(Extra), "strGallerySelected"), selectedImages.Count);
+            if (organizedPages.Any()) {
+                MsgLabel.Text = string.Format(Extra.ApplyResource(typeof(Extra), "strGallerySelected"), organizedPages.Count(page => page.IsSelected));
             }
             else if (StartButton.Enabled && Directory.Exists(PathLabel.Text)) {
                 MsgLabel.Text = Extra.ApplyResource(typeof(Extra), "strClickToStart");

@@ -202,9 +202,19 @@ local tempExtraPath
 -- this func will be processed before pdf generation start
 -- 定义开始前要进行的动作
 function Config:PreProcess(...)
-    local path, layout, quality, fileList = table.unpack({ ... })
+    local path, layout, quality, fileList, pageManifest = table.unpack({ ... })
     quality = quality or 80
     local compressSuffix = { ".zip", ".rar", ".7z" }
+    if pageManifest and fileExist(pageManifest) then
+        if not path or not dirExist(path) then
+            error("A valid source directory is required with a page manifest.")
+        end
+        local normalizedDir = trimEndingSeparator(path)
+        pdfFileName = sanitizeName(getDirName(normalizedDir))
+        outputDir = normalizedDir
+        PDFWrapper.ImagesToPDFManifest(pageManifest, layout, quality)
+        return
+    end
     if fileList and fileExist(fileList) then
         local imgList = {}
         for line in io.lines(fileList) do

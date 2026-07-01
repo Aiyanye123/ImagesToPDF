@@ -159,12 +159,44 @@ namespace ImgsToPDFCore {
             bitmap.Dispose();   // 释放位图占用的资源
         }
 
-        static float GetUniformTargetWidth(IEnumerable<string> imagePaths, Layout layout) {
+        static Bitmap LoadEditedBitmap(PageEdit page) {
+            Bitmap bitmap = LoadBitmap(page.Path);
+            if (bitmap == null) { return null; }
+            switch (page.Rotation) {
+                case 90:
+                    bitmap.RotateFlip(RotateFlipType.Rotate90FlipNone);
+                    break;
+                case 180:
+                    bitmap.RotateFlip(RotateFlipType.Rotate180FlipNone);
+                    break;
+                case 270:
+                    bitmap.RotateFlip(RotateFlipType.Rotate270FlipNone);
+                    break;
+            }
+
+            RectangleF crop = page.Crop;
+            if (crop.Left <= 0 && crop.Top <= 0 && crop.Right >= 1 && crop.Bottom >= 1) { return bitmap; }
+            int left = Math.Max(0, Math.Min(bitmap.Width - 1, (int)Math.Floor(crop.Left * bitmap.Width)));
+            int top = Math.Max(0, Math.Min(bitmap.Height - 1, (int)Math.Floor(crop.Top * bitmap.Height)));
+            int right = Math.Max(left + 1, Math.Min(bitmap.Width, (int)Math.Ceiling(crop.Right * bitmap.Width)));
+            int bottom = Math.Max(top + 1, Math.Min(bitmap.Height, (int)Math.Ceiling(crop.Bottom * bitmap.Height)));
+            var result = new Bitmap(right - left, bottom - top, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(result)) {
+                graphics.DrawImage(bitmap,
+                    new Rectangle(0, 0, result.Width, result.Height),
+                    new Rectangle(left, top, right - left, bottom - top),
+                    GraphicsUnit.Pixel);
+            }
+            bitmap.Dispose();
+            return result;
+        }
+
+        static float GetUniformTargetWidth(IEnumerable<PageEdit> pages, Layout layout) {
             const int duplexMargin = 10;
             float maxWidth = 0;
             if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
-                foreach (var imagePath in imagePaths) {
-                    using (var imagePic = LoadBitmap(imagePath)) {
+                foreach (PageEdit page in pages) {
+                    using (var imagePic = LoadEditedBitmap(page)) {
                         if (imagePic == null) { continue; }
                         if (imagePic.Width > maxWidth) {
                             maxWidth = imagePic.Width;
@@ -176,9 +208,17 @@ namespace ImgsToPDFCore {
 
             int pendingWidth = 0;
             int pendingHeight = 0;
-            foreach (var imagePath in imagePaths) {
-                using (var current = LoadBitmap(imagePath)) {
+            foreach (PageEdit page in pages) {
+                using (var current = LoadEditedBitmap(page)) {
                     if (current == null) { continue; }
+                    bool currentPortrait = current.Height >= current.Width;
+                    if (page.IsCover || !currentPortrait) {
+                        if (pendingWidth > maxWidth) { maxWidth = pendingWidth; }
+                        pendingWidth = 0;
+                        pendingHeight = 0;
+                        if (current.Width > maxWidth) { maxWidth = current.Width; }
+                        continue;
+                    }
                     if (pendingWidth == 0) {
                         pendingWidth = current.Width;
                         pendingHeight = current.Height;
@@ -186,7 +226,6 @@ namespace ImgsToPDFCore {
                     }
 
                     bool pendingPortrait = pendingHeight >= pendingWidth;
-                    bool currentPortrait = current.Height >= current.Width;
                     if (pendingPortrait && currentPortrait) {
                         var combinedWidth = pendingWidth + current.Width + duplexMargin;
                         if (combinedWidth > maxWidth) {
@@ -215,16 +254,17 @@ namespace ImgsToPDFCore {
             var width = bm1.Width + bm2.Width + margin;
             var height = Math.Max(bm1.Height, bm2.Height);
             Bitmap bitMap = new Bitmap(width, height);
-            Graphics canavas = Graphics.FromImage(bitMap);
-            canavas.FillRectangle(Brushes.White, new System.Drawing.Rectangle(0, 0, width, height));
-            canavas.DrawImage(bm1, 0, 0, bm1.Width, bm1.Height);
-            canavas.DrawImage(bm2, bm1.Width + margin, 0, bm2.Width, bm2.Height);
+            using (Graphics canavas = Graphics.FromImage(bitMap)) {
+                canavas.FillRectangle(Brushes.White, new System.Drawing.Rectangle(0, 0, width, height));
+                canavas.DrawImage(bm1, 0, 0, bm1.Width, bm1.Height);
+                canavas.DrawImage(bm2, bm1.Width + margin, 0, bm2.Width, bm2.Height);
+            }
             bm1.Dispose();
             bm2.Dispose();
             return bitMap;
         }
 
-        static void ImagesToPdf(IEnumerable<string> imagePaths, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
+        static void ImagesToPdf(IReadOnlyList<PageEdit> pages, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
             string pathToSave = CommonUtils.ToLongPath(CSGlobal.luaConfig.PathToSave()); // 从lua里读设置的保存路径
             bool shouldDeleteOutput = false;
             using (var fs = new FileStream(pathToSave, FileMode.Create, FileAccess.Write, FileShare.Read)) {
@@ -235,12 +275,12 @@ namespace ImgsToPDFCore {
 
                 float? uniformWidth = null;
                 if (CSGlobal.UniformWidthScale) {
-                    uniformWidth = GetUniformTargetWidth(imagePaths, layout);
+                    uniformWidth = GetUniformTargetWidth(pages, layout);
                 }
 
                 if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
-                    foreach (var imagePath in imagePaths) {
-                        Bitmap imagePic = LoadBitmap(imagePath);
+                    foreach (PageEdit page in pages) {
+                        Bitmap imagePic = LoadEditedBitmap(page);
                         if (imagePic == null) { continue; }
                         AddPage(document, imagePic, jpegQuality, uniformWidth);
                         hasImagePage = true;
@@ -248,28 +288,31 @@ namespace ImgsToPDFCore {
                 }
                 else {
                     Bitmap pending = null;
-                    foreach (var imagePath in imagePaths) {
-                        Bitmap current = LoadBitmap(imagePath);
+                    foreach (PageEdit page in pages) {
+                        Bitmap current = LoadEditedBitmap(page);
                         if (current == null) { continue; }
+                        bool currentPortrait = current.Height >= current.Width;
+                        if (page.IsCover || !currentPortrait) {
+                            if (pending != null) {
+                                AddPage(document, pending, jpegQuality, uniformWidth);
+                                hasImagePage = true;
+                                pending = null;
+                            }
+                            AddPage(document, current, jpegQuality, uniformWidth);
+                            hasImagePage = true;
+                            continue;
+                        }
                         if (pending == null) {
                             pending = current;
                             continue;
                         }
-                        if (pending.Height >= pending.Width && current.Height >= current.Width) {
-                            Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? pending : current;
-                            Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? current : pending;
-                            using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
-                                AddPage(document, combinedBitmap, jpegQuality, uniformWidth);
-                                hasImagePage = true;
-                            }
-                            pending = null;
-                        }
-                        else {
-                            AddPage(document, pending, jpegQuality, uniformWidth);
-                            AddPage(document, current, jpegQuality, uniformWidth);
+                        Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? pending : current;
+                        Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? current : pending;
+                        using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
+                            AddPage(document, combinedBitmap, jpegQuality, uniformWidth);
                             hasImagePage = true;
-                            pending = null;
                         }
+                        pending = null;
                     }
                     if (pending != null) {
                         AddPage(document, pending, jpegQuality, uniformWidth);
@@ -302,7 +345,7 @@ namespace ImgsToPDFCore {
                 .OrderBy(p => p, new StringLenComparer())
                 .ToList();
             if (!orderedPaths.Any()) { return; }
-            ImagesToPdf(orderedPaths, layout, jpegQuality);
+            ImagesToPdf(orderedPaths.Select((path, index) => new PageEdit { Path = path, OriginalIndex = index }).ToList(), layout, jpegQuality);
         }
 
         public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
@@ -312,7 +355,12 @@ namespace ImgsToPDFCore {
                 .OrderBy(p => p, new StringLenComparer())
                 .ToList();
             if (!imagepaths.Any()) { return; }
-            ImagesToPdf(imagepaths, layout, jpegQuality);
+            ImagesToPdf(imagepaths.Select((path, index) => new PageEdit { Path = path, OriginalIndex = index }).ToList(), layout, jpegQuality);
+        }
+
+        public static void ImagesToPDFManifest(string manifestPath, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
+            List<PageEdit> pages = PageManifest.Read(manifestPath);
+            ImagesToPdf(pages, layout, jpegQuality);
         }
 
         /// <summary>

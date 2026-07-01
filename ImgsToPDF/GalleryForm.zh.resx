@@ -59,7 +59,7 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="$this.Text" xml:space="preserve">
-    <value>浏览/筛选</value>
+    <value>专业整理</value>
   </data>
   <data name="applyFilterButton.Text" xml:space="preserve">
     <value>应用筛选</value>

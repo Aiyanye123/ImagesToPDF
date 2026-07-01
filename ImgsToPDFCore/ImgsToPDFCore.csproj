@@ -49,6 +49,7 @@
     <Compile Include="CSGlobal.cs" />
     <Compile Include="ImageFileExtensions.cs" />
     <Compile Include="IConfig.cs" />
+    <Compile Include="PageManifest.cs" />
     <Compile Include="PDFWrapper.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
