@@ -17,7 +17,7 @@
 
 - [x] Set the vertical scrollbar range from the total stacked page height and its `LargeChange` from the viewport height.
 - [x] Make the mouse wheel update the vertical pixel offset while horizontal mode continues to update the page index.
-- [x] Draw only vertical page slots intersecting the viewport; fit each page to the available width with 12px side margins and 12px page gaps.
+- [x] Draw only vertical page slots intersecting the viewport; fit each page to the available height with 12px top/bottom margins and 12px page gaps.
 - [x] Keep horizontal black-area navigation and right-to-left behavior unchanged.
 
 ### Task 2: Verify the focused change

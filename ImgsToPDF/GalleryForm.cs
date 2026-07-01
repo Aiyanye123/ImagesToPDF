@@ -1076,13 +1076,13 @@ namespace ImgsToPDF
 
             private void DrawVerticalPdfReader(Graphics graphics) {
                 Rectangle viewport = GetPreviewViewport();
-                int pageWidth = Math.Max(1, viewport.Width - PreviewMargin * 2);
+                int pageHeight = Math.Max(1, viewport.Height - PreviewMargin * 2);
                 int y = PreviewMargin - previewVScroll.Value;
                 int firstVisible = -1;
                 for (int index = 0; index < previewPages.Count; index++) {
                     PreviewPage page = previewPages[index];
-                    int pageHeight = GetVerticalPageHeight(page, pageWidth);
-                    var slot = new Rectangle(PreviewMargin, y, pageWidth, pageHeight);
+                    int pageWidth = GetVerticalPageWidth(page, pageHeight);
+                    var slot = new Rectangle((viewport.Width - pageWidth) / 2, y, pageWidth, pageHeight);
                     if (slot.Bottom >= viewport.Top && slot.Top <= viewport.Bottom) {
                         if (firstVisible < 0) { firstVisible = index; }
                         DrawFinishedPage(graphics, page, slot, index + 1, true);
@@ -1222,7 +1222,7 @@ namespace ImgsToPDF
                 previewHScroll.RightToLeft = layout == 2 ? RightToLeft.Yes : RightToLeft.No;
                 previewVScroll.Minimum = previewHScroll.Minimum = 0;
                 Rectangle viewport = GetPreviewViewport();
-                int verticalContentHeight = GetVerticalContentHeight(viewport.Width);
+                int verticalContentHeight = GetVerticalContentHeight(viewport.Height);
                 previewVScroll.LargeChange = Math.Max(1, viewport.Height);
                 previewVScroll.SmallChange = 48;
                 previewVScroll.Maximum = Math.Max(0, verticalContentHeight - 1);
@@ -1284,18 +1284,14 @@ namespace ImgsToPDF
                 return preview == null ? slot : FitRect(preview.Size, slot);
             }
 
-            private int GetVerticalContentHeight(int viewportWidth) {
-                int pageWidth = Math.Max(1, viewportWidth - PreviewMargin * 2);
-                int height = PreviewMargin;
-                foreach (PreviewPage page in previewPages) {
-                    height += GetVerticalPageHeight(page, pageWidth) + PreviewGap;
-                }
-                return height;
+            private int GetVerticalContentHeight(int viewportHeight) {
+                int pageHeight = Math.Max(1, viewportHeight - PreviewMargin * 2);
+                return PreviewMargin + previewPages.Count * (pageHeight + PreviewGap);
             }
 
-            private static int GetVerticalPageHeight(PreviewPage page, int pageWidth) {
+            private static int GetVerticalPageWidth(PreviewPage page, int pageHeight) {
                 Size size = GetPreviewPageSize(page);
-                return Math.Max(1, (int)Math.Round(pageWidth * size.Height / (double)Math.Max(1, size.Width)));
+                return Math.Max(1, (int)Math.Round(pageHeight * size.Width / (double)Math.Max(1, size.Height)));
             }
 
             private static Size GetPreviewPageSize(PreviewPage page) {
