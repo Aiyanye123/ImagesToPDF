@@ -158,7 +158,13 @@
     <value>227, 34</value>
   </data>
   <data name="toolStripMenuOpenFolder.Text" xml:space="preserve">
-    <value>打开文件夹(&amp;O)</value>
+    <value>导入文件夹(&amp;F)</value>
+  </data>
+  <data name="toolStripMenuImportArchive.Size" type="System.Drawing.Size, System.Drawing">
+    <value>227, 34</value>
+  </data>
+  <data name="toolStripMenuImportArchive.Text" xml:space="preserve">
+    <value>导入压缩包(&amp;A)</value>
   </data>
   <data name="toolStripMenuClearChosen.Size" type="System.Drawing.Size, System.Drawing">
     <value>227, 34</value>

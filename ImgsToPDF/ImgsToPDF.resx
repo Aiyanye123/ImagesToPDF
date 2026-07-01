@@ -409,7 +409,13 @@
     <value>185, 34</value>
   </data>
   <data name="toolStripMenuOpenFolder.Text" xml:space="preserve">
-    <value>Open(&amp;O)</value>
+    <value>Import Folders(&amp;F)</value>
+  </data>
+  <data name="toolStripMenuImportArchive.Size" type="System.Drawing.Size, System.Drawing">
+    <value>185, 34</value>
+  </data>
+  <data name="toolStripMenuImportArchive.Text" xml:space="preserve">
+    <value>Import Archives(&amp;A)</value>
   </data>
   <data name="toolStripMenuClearChosen.Size" type="System.Drawing.Size, System.Drawing">
     <value>185, 34</value>

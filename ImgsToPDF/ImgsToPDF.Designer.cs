@@ -40,6 +40,7 @@ namespace ImgsToPDF {
             this.menuStripMain = new System.Windows.Forms.MenuStrip();
             this.toolStripMenuFile = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuOpenFolder = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripMenuImportArchive = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuClearChosen = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.toolStripMenuExit = new System.Windows.Forms.ToolStripMenuItem();
@@ -151,6 +152,7 @@ namespace ImgsToPDF {
             //
             this.toolStripMenuFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.toolStripMenuOpenFolder,
+            this.toolStripMenuImportArchive,
             this.toolStripMenuClearChosen,
             this.toolStripSeparator1,
             this.toolStripMenuExit});
@@ -162,6 +164,12 @@ namespace ImgsToPDF {
             this.toolStripMenuOpenFolder.Name = "toolStripMenuOpenFolder";
             resources.ApplyResources(this.toolStripMenuOpenFolder, "toolStripMenuOpenFolder");
             this.toolStripMenuOpenFolder.Click += new System.EventHandler(this.toolStripMenuOpenFolder_Click);
+            //
+            // toolStripMenuImportArchive
+            //
+            this.toolStripMenuImportArchive.Name = "toolStripMenuImportArchive";
+            resources.ApplyResources(this.toolStripMenuImportArchive, "toolStripMenuImportArchive");
+            this.toolStripMenuImportArchive.Click += new System.EventHandler(this.toolStripMenuImportArchive_Click);
             //
             // toolStripMenuClearChosen
             //
@@ -277,6 +285,7 @@ namespace ImgsToPDF {
         private System.Windows.Forms.MenuStrip menuStripMain;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuFile;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuOpenFolder;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuImportArchive;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator1;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuExit;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuConfigFile;
