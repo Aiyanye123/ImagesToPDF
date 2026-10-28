@@ -19,8 +19,8 @@ namespace ImgsToPDFCore {
         private const int DefaultJpegQuality = 80;
 
         static iTextSharp.text.Image GetImageInstance(Bitmap bitmap, int jpegQuality) {
-            bool hasAlpha = HasTransparency(bitmap);
             if (jpegQuality != OriginalQuality) {
+                bool hasAlpha = HasTransparency(bitmap);
                 return hasAlpha
                     ? iTextSharp.text.Image.GetInstance(ToPngBytes(bitmap))
                     : iTextSharp.text.Image.GetInstance(ToJpegBytes(bitmap, jpegQuality));
@@ -43,16 +43,11 @@ namespace ImgsToPDFCore {
                 var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
                 var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
                 try {
-                    if (data.Stride < 0) {
-                        return HasTransparencySlow(bitmap);
-                    }
-                    int stride = data.Stride;
-                    var pixels = new byte[stride * bitmap.Height];
-                    Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
+                    var pixels = new byte[bitmap.Width * 4];
                     for (int y = 0; y < bitmap.Height; y++) {
-                        int row = y * stride;
+                        Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), pixels, 0, pixels.Length);
                         for (int x = 0; x < bitmap.Width; x++) {
-                            if (pixels[row + x * 4 + 3] < 255) {
+                            if (pixels[x * 4 + 3] < 255) {
                                 return true;
                             }
                         }
@@ -112,83 +107,152 @@ namespace ImgsToPDFCore {
         }
 
         static void AddPage(iTextSharp.text.Document document, Bitmap bitmap, int jpegQuality, float? uniformWidth) {
+            using (bitmap) {
+                AddPage(document, GetImageInstance(bitmap, jpegQuality), bitmap.Width, bitmap.Height, uniformWidth);
+            }
+        }
+
+        static void AddPage(iTextSharp.text.Document document, iTextSharp.text.Image image, float width, float height, float? uniformWidth) {
             var configuredPageSize = CSGlobal.luaConfig.PageSizeToSave;
             bool useFixedPageSize = configuredPageSize != null
                 && configuredPageSize.Width > 0
                 && configuredPageSize.Height > 0;
+            bool useUniformWidth = uniformWidth.HasValue && uniformWidth.Value > 0;
+            iTextSharp.text.Rectangle pageSize;
 
-            if (uniformWidth.HasValue && uniformWidth.Value > 0) {
+            if (useUniformWidth) {
                 var targetWidth = useFixedPageSize ? configuredPageSize.Width : uniformWidth.Value;
-                var scale = targetWidth / bitmap.Width;
-                var targetHeight = bitmap.Height * scale;
-                var uniformPageSize = new iTextSharp.text.Rectangle(0, 0, targetWidth, targetHeight);
-                document.SetPageSize(uniformPageSize);
-                document.SetMargins(0, 0, 0, 0);
-                var image = GetImageInstance(bitmap, jpegQuality);
-                image.ScaleAbsolute(uniformPageSize.Width, uniformPageSize.Height);
-                image.SetAbsolutePosition(0, 0);
-                document.NewPage();
-                document.PageCount = document.PageNumber + 1;
-                document.Add(image);
-                bitmap.Dispose();
-                return;
+                var scale = targetWidth / width;
+                var targetHeight = height * scale;
+                pageSize = new iTextSharp.text.Rectangle(0, 0, targetWidth, targetHeight);
+            }
+            else {
+                pageSize = useFixedPageSize
+                    ? configuredPageSize
+                    : new iTextSharp.text.Rectangle(0, 0, width, height);
             }
 
-            iTextSharp.text.Rectangle pageSize = useFixedPageSize
-                ? configuredPageSize
-                : new iTextSharp.text.Rectangle(0, 0, bitmap.Width, bitmap.Height);
-
             document.SetPageSize(pageSize);
-            var resultImage = GetImageInstance(bitmap, jpegQuality);
 
-            if (useFixedPageSize) {
-                resultImage.ScaleToFit(pageSize.Width, pageSize.Height);
-                var wMargins = (pageSize.Width - resultImage.ScaledWidth) / 2;
-                var hMargins = (pageSize.Height - resultImage.ScaledHeight) / 2;
+            if (useFixedPageSize && !useUniformWidth) {
+                image.ScaleToFit(pageSize.Width, pageSize.Height);
+                var wMargins = (pageSize.Width - image.ScaledWidth) / 2;
+                var hMargins = (pageSize.Height - image.ScaledHeight) / 2;
                 document.SetMargins(wMargins, wMargins, hMargins, hMargins);
             }
             else {
                 document.SetMargins(0, 0, 0, 0);
-                resultImage.ScaleAbsolute(pageSize.Width, pageSize.Height);
-                resultImage.SetAbsolutePosition(0, 0);
+                image.ScaleAbsolute(pageSize.Width, pageSize.Height);
+                image.SetAbsolutePosition(0, 0);
             }
 
             document.NewPage();
             document.PageCount = document.PageNumber + 1;
-            document.Add(resultImage);
-            bitmap.Dispose();   // 释放位图占用的资源
+            document.Add(image);
+            ExportRuntime.PageWritten();
+        }
+
+        static bool HasFullCrop(RectangleF crop) {
+            return crop.Left <= 0 && crop.Top <= 0 && crop.Right >= 1 && crop.Bottom >= 1;
+        }
+
+        static Rectangle GetCropRectangle(Size size, RectangleF crop) {
+            if (HasFullCrop(crop)) { return new Rectangle(Point.Empty, size); }
+            int left = Math.Max(0, Math.Min(size.Width - 1, (int)Math.Floor(crop.Left * size.Width)));
+            int top = Math.Max(0, Math.Min(size.Height - 1, (int)Math.Floor(crop.Top * size.Height)));
+            int right = Math.Max(left + 1, Math.Min(size.Width, (int)Math.Ceiling(crop.Right * size.Width)));
+            int bottom = Math.Max(top + 1, Math.Min(size.Height, (int)Math.Ceiling(crop.Bottom * size.Height)));
+            return new Rectangle(left, top, right - left, bottom - top);
+        }
+
+        static bool TryGetEditedSize(PageEdit page, out Size size) {
+            size = Size.Empty;
+            try {
+                if (string.Equals(Path.GetExtension(page.Path), ".webp", StringComparison.OrdinalIgnoreCase)) {
+                    using (var webp = new WebP()) {
+                        webp.GetInfo(File.ReadAllBytes(page.Path), out int width, out int height,
+                            out bool hasAlpha, out bool hasAnimation, out string format);
+                        size = new Size(width, height);
+                    }
+                }
+                else {
+                    using (var stream = File.OpenRead(page.Path))
+                    using (var image = Image.FromStream(stream, false, false)) {
+                        size = image.Size;
+                    }
+                }
+                if (size.Width <= 0 || size.Height <= 0) { return false; }
+                if (page.Rotation == 90 || page.Rotation == 270) {
+                    size = new Size(size.Height, size.Width);
+                }
+                size = GetCropRectangle(size, page.Crop).Size;
+                return true;
+            }
+            catch (Exception) {
+                return false;
+            }
+        }
+
+        static bool TryLoadOriginalJpeg(PageEdit page, int jpegQuality, bool requireLandscape, out iTextSharp.text.Image image) {
+            image = null;
+            if (jpegQuality != OriginalQuality || page.Rotation != 0 || !HasFullCrop(page.Crop)) { return false; }
+            try {
+                using (var stream = File.OpenRead(page.Path)) {
+                    if (stream.ReadByte() != 0xff || stream.ReadByte() != 0xd8 || stream.ReadByte() != 0xff) { return false; }
+                    if (requireLandscape) {
+                        stream.Position = 0;
+                        using (var metadata = Image.FromStream(stream, false, false)) {
+                            if (metadata.Height >= metadata.Width) { return false; }
+                        }
+                    }
+                }
+                image = iTextSharp.text.Image.GetInstance(page.Path);
+                return true;
+            }
+            catch (Exception) {
+                return false;
+            }
         }
 
         static Bitmap LoadEditedBitmap(PageEdit page) {
             Bitmap bitmap = LoadBitmap(page.Path);
             if (bitmap == null) { return null; }
-            switch (page.Rotation) {
-                case 90:
-                    bitmap.RotateFlip(RotateFlipType.Rotate90FlipNone);
-                    break;
-                case 180:
-                    bitmap.RotateFlip(RotateFlipType.Rotate180FlipNone);
-                    break;
-                case 270:
-                    bitmap.RotateFlip(RotateFlipType.Rotate270FlipNone);
-                    break;
-            }
+            try {
+                switch (page.Rotation) {
+                    case 90:
+                        bitmap.RotateFlip(RotateFlipType.Rotate90FlipNone);
+                        break;
+                    case 180:
+                        bitmap.RotateFlip(RotateFlipType.Rotate180FlipNone);
+                        break;
+                    case 270:
+                        bitmap.RotateFlip(RotateFlipType.Rotate270FlipNone);
+                        break;
+                }
 
-            RectangleF crop = page.Crop;
-            if (crop.Left <= 0 && crop.Top <= 0 && crop.Right >= 1 && crop.Bottom >= 1) { return bitmap; }
-            int left = Math.Max(0, Math.Min(bitmap.Width - 1, (int)Math.Floor(crop.Left * bitmap.Width)));
-            int top = Math.Max(0, Math.Min(bitmap.Height - 1, (int)Math.Floor(crop.Top * bitmap.Height)));
-            int right = Math.Max(left + 1, Math.Min(bitmap.Width, (int)Math.Ceiling(crop.Right * bitmap.Width)));
-            int bottom = Math.Max(top + 1, Math.Min(bitmap.Height, (int)Math.Ceiling(crop.Bottom * bitmap.Height)));
-            var result = new Bitmap(right - left, bottom - top, PixelFormat.Format32bppArgb);
-            using (var graphics = Graphics.FromImage(result)) {
-                graphics.DrawImage(bitmap,
-                    new Rectangle(0, 0, result.Width, result.Height),
-                    new Rectangle(left, top, right - left, bottom - top),
-                    GraphicsUnit.Pixel);
+                RectangleF crop = page.Crop;
+                if (HasFullCrop(crop)) { return bitmap; }
+                Rectangle cropRectangle = GetCropRectangle(bitmap.Size, crop);
+                var result = new Bitmap(cropRectangle.Width, cropRectangle.Height, PixelFormat.Format32bppArgb);
+                try {
+                    using (var graphics = Graphics.FromImage(result)) {
+                        graphics.DrawImage(bitmap,
+                            new Rectangle(0, 0, result.Width, result.Height),
+                            cropRectangle,
+                            GraphicsUnit.Pixel);
+                    }
+                }
+                catch (Exception) {
+                    result.Dispose();
+                    throw;
+                }
+                bitmap.Dispose();
+                return result;
             }
-            bitmap.Dispose();
-            return result;
+            catch (Exception) {
+                bitmap.Dispose();
+                throw;
+            }
         }
 
         static float GetUniformTargetWidth(IEnumerable<PageEdit> pages, Layout layout) {
@@ -196,53 +260,35 @@ namespace ImgsToPDFCore {
             float maxWidth = 0;
             if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
                 foreach (PageEdit page in pages) {
-                    using (var imagePic = LoadEditedBitmap(page)) {
-                        if (imagePic == null) { continue; }
-                        if (imagePic.Width > maxWidth) {
-                            maxWidth = imagePic.Width;
-                        }
+                    ExportRuntime.ThrowIfCancellationRequested();
+                    if (!TryGetEditedSize(page, out Size size)) { continue; }
+                    if (size.Width > maxWidth) {
+                        maxWidth = size.Width;
                     }
                 }
                 return maxWidth;
             }
 
             int pendingWidth = 0;
-            int pendingHeight = 0;
             foreach (PageEdit page in pages) {
-                using (var current = LoadEditedBitmap(page)) {
-                    if (current == null) { continue; }
-                    bool currentPortrait = current.Height >= current.Width;
-                    if (page.IsCover || !currentPortrait) {
-                        if (pendingWidth > maxWidth) { maxWidth = pendingWidth; }
-                        pendingWidth = 0;
-                        pendingHeight = 0;
-                        if (current.Width > maxWidth) { maxWidth = current.Width; }
-                        continue;
-                    }
-                    if (pendingWidth == 0) {
-                        pendingWidth = current.Width;
-                        pendingHeight = current.Height;
-                        continue;
-                    }
-
-                    bool pendingPortrait = pendingHeight >= pendingWidth;
-                    if (pendingPortrait && currentPortrait) {
-                        var combinedWidth = pendingWidth + current.Width + duplexMargin;
-                        if (combinedWidth > maxWidth) {
-                            maxWidth = combinedWidth;
-                        }
-                    }
-                    else {
-                        if (pendingWidth > maxWidth) {
-                            maxWidth = pendingWidth;
-                        }
-                        if (current.Width > maxWidth) {
-                            maxWidth = current.Width;
-                        }
-                    }
+                ExportRuntime.ThrowIfCancellationRequested();
+                if (!TryGetEditedSize(page, out Size current)) { continue; }
+                if (page.IsCover || current.Height < current.Width) {
+                    if (pendingWidth > maxWidth) { maxWidth = pendingWidth; }
                     pendingWidth = 0;
-                    pendingHeight = 0;
+                    if (current.Width > maxWidth) { maxWidth = current.Width; }
+                    continue;
                 }
+                if (pendingWidth == 0) {
+                    pendingWidth = current.Width;
+                    continue;
+                }
+
+                var combinedWidth = pendingWidth + current.Width + duplexMargin;
+                if (combinedWidth > maxWidth) {
+                    maxWidth = combinedWidth;
+                }
+                pendingWidth = 0;
             }
             if (pendingWidth > maxWidth) {
                 maxWidth = pendingWidth;
@@ -251,90 +297,144 @@ namespace ImgsToPDFCore {
         }
 
         static Bitmap CombineBitmap(Bitmap bm1, Bitmap bm2, int margin) {
-            var width = bm1.Width + bm2.Width + margin;
-            var height = Math.Max(bm1.Height, bm2.Height);
-            Bitmap bitMap = new Bitmap(width, height);
-            using (Graphics canavas = Graphics.FromImage(bitMap)) {
-                canavas.FillRectangle(Brushes.White, new System.Drawing.Rectangle(0, 0, width, height));
-                canavas.DrawImage(bm1, 0, 0, bm1.Width, bm1.Height);
-                canavas.DrawImage(bm2, bm1.Width + margin, 0, bm2.Width, bm2.Height);
+            using (bm1)
+            using (bm2) {
+                var width = bm1.Width + bm2.Width + margin;
+                var height = Math.Max(bm1.Height, bm2.Height);
+                Bitmap bitmap = new Bitmap(width, height);
+                try {
+                    using (Graphics canvas = Graphics.FromImage(bitmap)) {
+                        canvas.FillRectangle(Brushes.White, new Rectangle(0, 0, width, height));
+                        canvas.DrawImage(bm1, 0, 0, bm1.Width, bm1.Height);
+                        canvas.DrawImage(bm2, bm1.Width + margin, 0, bm2.Width, bm2.Height);
+                    }
+                    return bitmap;
+                }
+                catch (Exception) {
+                    bitmap.Dispose();
+                    throw;
+                }
             }
-            bm1.Dispose();
-            bm2.Dispose();
-            return bitMap;
         }
 
-        static void ImagesToPdf(IReadOnlyList<PageEdit> pages, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
-            string pathToSave = CommonUtils.ToLongPath(CSGlobal.luaConfig.PathToSave()); // 从lua里读设置的保存路径
-            bool shouldDeleteOutput = false;
-            using (var fs = new FileStream(pathToSave, FileMode.Create, FileAccess.Write, FileShare.Read)) {
-                var document = new iTextSharp.text.Document(iTextSharp.text.PageSize.A4, 0, 0, 0, 0);
-                iTextSharp.text.pdf.PdfWriter.GetInstance(document, fs).SetFullCompression();
-                document.Open();
-                bool hasImagePage = false;
-
-                float? uniformWidth = null;
-                if (CSGlobal.UniformWidthScale) {
-                    uniformWidth = GetUniformTargetWidth(pages, layout);
-                }
-
-                if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
-                    foreach (PageEdit page in pages) {
-                        Bitmap imagePic = LoadEditedBitmap(page);
-                        if (imagePic == null) { continue; }
-                        AddPage(document, imagePic, jpegQuality, uniformWidth);
-                        hasImagePage = true;
+        static void WriteSinglePages(iTextSharp.text.Document document, IReadOnlyList<PageEdit> pages, int jpegQuality, float? uniformWidth) {
+            foreach (PageEdit page in pages) {
+                ExportRuntime.ThrowIfCancellationRequested();
+                try {
+                    if (TryLoadOriginalJpeg(page, jpegQuality, false, out iTextSharp.text.Image originalJpeg)) {
+                        AddPage(document, originalJpeg, originalJpeg.Width, originalJpeg.Height, uniformWidth);
+                    }
+                    else {
+                        Bitmap bitmap = LoadEditedBitmap(page);
+                        if (bitmap == null) { continue; }
+                        AddPage(document, bitmap, jpegQuality, uniformWidth);
                     }
                 }
-                else {
-                    Bitmap pending = null;
-                    foreach (PageEdit page in pages) {
-                        Bitmap current = LoadEditedBitmap(page);
-                        if (current == null) { continue; }
-                        bool currentPortrait = current.Height >= current.Width;
-                        if (page.IsCover || !currentPortrait) {
-                            if (pending != null) {
-                                AddPage(document, pending, jpegQuality, uniformWidth);
-                                hasImagePage = true;
-                                pending = null;
+                finally {
+                    ExportRuntime.InputProcessed();
+                }
+            }
+        }
+
+        static void WriteDuplexPages(iTextSharp.text.Document document, IReadOnlyList<PageEdit> pages, Layout layout, int jpegQuality, float? uniformWidth) {
+            Bitmap pending = null;
+            try {
+                foreach (PageEdit page in pages) {
+                    ExportRuntime.ThrowIfCancellationRequested();
+                    Bitmap current = null;
+                    try {
+                        bool useOriginalJpeg = TryLoadOriginalJpeg(page, jpegQuality, !page.IsCover, out iTextSharp.text.Image originalJpeg);
+                        current = useOriginalJpeg ? null : LoadEditedBitmap(page);
+                        if (!useOriginalJpeg && current == null) { continue; }
+                        if (useOriginalJpeg || page.IsCover || current.Height < current.Width) {
+                            AddPendingPage(document, ref pending, jpegQuality, uniformWidth);
+                            if (useOriginalJpeg) {
+                                AddPage(document, originalJpeg, originalJpeg.Width, originalJpeg.Height, uniformWidth);
                             }
-                            AddPage(document, current, jpegQuality, uniformWidth);
-                            hasImagePage = true;
+                            else {
+                                Bitmap standalone = current;
+                                current = null;
+                                AddPage(document, standalone, jpegQuality, uniformWidth);
+                            }
                             continue;
                         }
                         if (pending == null) {
                             pending = current;
+                            current = null;
                             continue;
                         }
                         Bitmap picAtLeft = layout == Layout.DuplexLeftToRight ? pending : current;
                         Bitmap picAtRight = layout == Layout.DuplexLeftToRight ? current : pending;
-                        using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
-                            AddPage(document, combinedBitmap, jpegQuality, uniformWidth);
-                            hasImagePage = true;
-                        }
                         pending = null;
+                        current = null;
+                        AddPage(document, CombineBitmap(picAtLeft, picAtRight, 10), jpegQuality, uniformWidth);
                     }
-                    if (pending != null) {
-                        AddPage(document, pending, jpegQuality, uniformWidth);
-                        hasImagePage = true;
-                        pending = null;
+                    finally {
+                        current?.Dispose();
+                        ExportRuntime.InputProcessed();
                     }
                 }
-
-                if (!hasImagePage) {
-                    document.NewPage();
-                    document.Add(iTextSharp.text.Chunk.NEWLINE);
-                    shouldDeleteOutput = true;
+                ExportRuntime.ThrowIfCancellationRequested();
+                if (pending != null) {
+                    AddPendingPage(document, ref pending, jpegQuality, uniformWidth);
                 }
-                document.Close();
             }
-            if (shouldDeleteOutput && File.Exists(pathToSave)) {
-                try {
-                    File.Delete(pathToSave);
+            finally {
+                pending?.Dispose();
+            }
+        }
+
+        static void AddPendingPage(iTextSharp.text.Document document, ref Bitmap pending, int jpegQuality, float? uniformWidth) {
+            if (pending == null) { return; }
+            Bitmap bitmap = pending;
+            pending = null;
+            AddPage(document, bitmap, jpegQuality, uniformWidth);
+        }
+
+        static void ImagesToPdf(IReadOnlyList<PageEdit> pages, Layout layout = Layout.Single, int jpegQuality = DefaultJpegQuality) {
+            ExportRuntime.ThrowIfCancellationRequested();
+            ExportRuntime.BeginProgress(pages.Count);
+            string pathToSave = ExportRuntime.GetOutputPath(CSGlobal.luaConfig.PathToSave());
+            string directory = Path.GetDirectoryName(pathToSave);
+            Directory.CreateDirectory(directory);
+            string stagePath = Path.Combine(directory, "." + Path.GetFileNameWithoutExtension(pathToSave)
+                + "." + Guid.NewGuid().ToString("N") + ".stage");
+            try {
+                using (var fs = new FileStream(CommonUtils.ToLongPath(stagePath), FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                using (var document = new iTextSharp.text.Document(iTextSharp.text.PageSize.A4, 0, 0, 0, 0)) {
+                    iTextSharp.text.pdf.PdfWriter.GetInstance(document, fs).SetFullCompression();
+                    document.Open();
+                    try {
+                        float? uniformWidth = null;
+                        if (CSGlobal.UniformWidthScale) {
+                            uniformWidth = GetUniformTargetWidth(pages, layout);
+                        }
+                        if (layout == Layout.DuplexLeftToRight || layout == Layout.DuplexRightToLeft) {
+                            WriteDuplexPages(document, pages, layout, jpegQuality, uniformWidth);
+                        }
+                        else {
+                            WriteSinglePages(document, pages, jpegQuality, uniformWidth);
+                        }
+                    }
+                    finally {
+                        try {
+                            if (ExportRuntime.WrittenPages == 0) {
+                                document.NewPage();
+                                document.Add(iTextSharp.text.Chunk.NEWLINE);
+                            }
+                            document.Close();
+                        }
+                        catch (Exception) {
+                            ExportRuntime.CleanupFailed = true;
+                            throw;
+                        }
+                    }
                 }
-                catch (Exception) {
-                    // Keep silent: empty PDF cleanup failure should not break main flow.
-                }
+                ExportRuntime.ThrowIfCancellationRequested();
+                if (ExportRuntime.WrittenPages > 0) { ExportRuntime.CommitOutput(stagePath, pathToSave); }
+            }
+            finally {
+                if (File.Exists(CommonUtils.ToLongPath(stagePath))) { ExportRuntime.RecycleFile(stagePath); }
             }
         }
 

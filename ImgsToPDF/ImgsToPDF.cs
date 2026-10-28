@@ -26,6 +26,8 @@ namespace ImgsToPDF
         private readonly Button clearCurrentButton = new Button();
         private readonly Label queueStatusLabel = new Label();
         private Image ownedPreviewImage;
+        private int previewRequestVersion;
+        private readonly System.Threading.SemaphoreSlim previewLoadGate = new System.Threading.SemaphoreSlim(1, 1);
         private readonly Timer topMostAnimationTimer = new Timer();
         private int topMostAnimationTick = 0;
         private const int TopMostAnimationFrames = 8;
@@ -41,10 +43,9 @@ namespace ImgsToPDF
             System.Threading.Thread.CurrentThread.CurrentUICulture = new System.Globalization.CultureInfo(language);
 
             this.StartPosition = FormStartPosition.CenterScreen; // Center the window.
-            CheckForIllegalCrossThreadCalls = false; // Background task updates existing UI state.
-
             InitializeComponent();
             InitializeQueueControls();
+            InitializeExportSettings();
             this.TopMost = Properties.Settings.Default.AlwaysOnTop;
             toolStripMenuTopMost.Checked = this.TopMost;
             UpdateTopMostMenuStyle();
@@ -71,6 +72,15 @@ namespace ImgsToPDF
         protected override void OnFormClosed(FormClosedEventArgs e) {
             ReleaseOwnedPreviewImage();
             base.OnFormClosed(e);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e) {
+            if (isExporting) {
+                closeAfterExport = true;
+                RequestExportStop();
+                e.Cancel = true;
+            }
+            base.OnFormClosing(e);
         }
 
         static readonly string[] compressExtensions = { ".zip", ".rar", ".7z" };
@@ -120,6 +130,7 @@ namespace ImgsToPDF
         }
 
         private void MoveQueue(int delta) {
+            if (isExporting) { return; }
             int nextIndex = queueIndex + delta;
             if (nextIndex < 0 || nextIndex >= pathQueue.Count) { return; }
             queueIndex = nextIndex;
@@ -127,6 +138,7 @@ namespace ImgsToPDF
         }
 
         private void RemoveCurrentQueueItem() {
+            if (isExporting) { return; }
             if (queueIndex < 0 || queueIndex >= pathQueue.Count) { return; }
             pathQueue.RemoveAt(queueIndex);
             if (queueIndex >= pathQueue.Count) {
@@ -160,12 +172,12 @@ namespace ImgsToPDF
             clearCurrentButton.Visible = hasQueue;
             queueStatusLabel.Visible = hasQueue;
             queueStatusLabel.Text = hasQueue ? $"{queueIndex + 1} / {pathQueue.Count}" : string.Empty;
-            StartButton.Enabled = hasQueue;
-            GalleryButton.Enabled = hasQueue && Directory.Exists(PathLabel.Text);
+            StartButton.Enabled = isExporting ? !exportCancellation.WaitOne(0) : hasQueue;
+            GalleryButton.Enabled = !isExporting && hasQueue && Directory.Exists(PathLabel.Text);
         }
 
         private void ImgsToPDF_DragEnter(object sender, DragEventArgs e) {
-            if (!e.Data.GetDataPresent(DataFormats.FileDrop)) {
+            if (isExporting || !e.Data.GetDataPresent(DataFormats.FileDrop)) {
                 e.Effect = DragDropEffects.None;
                 return;
             }
@@ -183,6 +195,7 @@ namespace ImgsToPDF
         }
 
         private void AppendToQueue(IEnumerable<string> paths) {
+            if (isExporting) { return; }
             foreach (string path in paths.Where(IsSupportedInputPath)) {
                 if (!pathQueue.Contains(path, StringComparer.OrdinalIgnoreCase)) {
                     pathQueue.Add(path);
@@ -215,19 +228,7 @@ namespace ImgsToPDF
             if (Directory.Exists(directoryPath)) {
                 PicInFolder.Image = Properties.Resources.no_photo;
                 FolderImg.Image = Properties.Resources.folder;
-                IEnumerable<string> imagepaths = Directory.EnumerateFiles(directoryPath)
-                    .Where(ImageFileExtensions.IsSupported);
-                foreach (var imagepath in imagepaths) {
-                    try {
-                        ownedPreviewImage = LoadPreviewBitmap(imagepath);
-                        PicInFolder.Image = ownedPreviewImage;
-                        break;
-                    }
-                    catch (Exception) {
-                        // Skip invalid image files.
-                        continue;
-                    }
-                }
+                _ = UpdatePreviewAsync(directoryPath, true);
             }
             else if (compressExtensions.Contains(Path.GetExtension(directoryPath)?.ToLower())) {
                 PicInFolder.Image = Properties.Resources.compressedFile;
@@ -246,175 +247,90 @@ namespace ImgsToPDF
         }
 
         private void ReleaseOwnedPreviewImage() {
+            previewRequestVersion++;
             if (ownedPreviewImage == null) { return; }
+            PicInFolder.Image = null;
             ownedPreviewImage.Dispose();
             ownedPreviewImage = null;
         }
 
-        private static Bitmap LoadPreviewBitmap(string imagePath) {
-            if (string.Equals(Path.GetExtension(imagePath), ".webp", StringComparison.OrdinalIgnoreCase)) {
-                using (var webp = new WebP()) {
-                    return webp.Load(imagePath);
+        private async Task UpdatePreviewAsync(string path, bool isDirectory) {
+            int requestVersion = previewRequestVersion;
+            Size previewSize = PicInFolder.ClientSize;
+            await previewLoadGate.WaitAsync();
+            Bitmap preview = null;
+            try {
+                if (IsDisposed || Disposing || requestVersion != previewRequestVersion) { return; }
+                preview = await Task.Run(() => isDirectory
+                    ? LoadDirectoryPreviewBitmap(path, previewSize)
+                    : LoadPreviewBitmap(path, previewSize));
+                if (IsDisposed || Disposing || requestVersion != previewRequestVersion) { return; }
+                if (preview != null) {
+                    ownedPreviewImage = preview;
+                    PicInFolder.Image = preview;
+                    preview = null;
                 }
             }
+            catch (Exception ex) {
+                if (!IsDisposed && !Disposing && requestVersion == previewRequestVersion) {
+                    MsgLabel.Text = ex.Message;
+                }
+            }
+            finally {
+                preview?.Dispose();
+                previewLoadGate.Release();
+            }
+        }
 
-            return new Bitmap(imagePath);
+        private static Bitmap LoadDirectoryPreviewBitmap(string directoryPath, Size previewSize) {
+            foreach (string imagePath in Directory.EnumerateFiles(directoryPath).Where(ImageFileExtensions.IsSupported)) {
+                try {
+                    return LoadPreviewBitmap(imagePath, previewSize);
+                }
+                catch (Exception) {
+                    // Skip invalid image files.
+                }
+            }
+            return null;
+        }
+
+        private static Bitmap LoadPreviewBitmap(string imagePath, Size previewSize) {
+            Bitmap source;
+            if (string.Equals(Path.GetExtension(imagePath), ".webp", StringComparison.OrdinalIgnoreCase)) {
+                using (var webp = new WebP()) {
+                    source = webp.Load(imagePath);
+                }
+            }
+            else {
+                source = new Bitmap(imagePath);
+            }
+            using (source) {
+                double scale = Math.Min(1, Math.Min(
+                    Math.Max(1, previewSize.Width) / (double)source.Width,
+                    Math.Max(1, previewSize.Height) / (double)source.Height));
+                int width = Math.Max(1, (int)Math.Round(source.Width * scale));
+                int height = Math.Max(1, (int)Math.Round(source.Height * scale));
+                var preview = new Bitmap(width, height);
+                try {
+                    using (Graphics graphics = Graphics.FromImage(preview)) {
+                        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        graphics.DrawImage(source, 0, 0, width, height);
+                    }
+                    return preview;
+                }
+                catch {
+                    preview.Dispose();
+                    throw;
+                }
+            }
         }
 
         private void ImgsToPDF_DragDrop(object sender, DragEventArgs e) {
             var paths = ((System.Array)e.Data.GetData(DataFormats.FileDrop)).Cast<object>().Select(x => x.ToString());
             AppendToQueue(paths);
         }
-        private async void StartButton_Click(object sender, EventArgs e) {
-            progressBar.Visible = true;
-            progressBar.Maximum = 100;
-            StartButton.Enabled = false;
-            GalleryButton.Enabled = false;
-            while (queueIndex >= 0 && queueIndex < pathQueue.Count) {
-                MsgLabel.Text = Extra.ApplyResource(typeof(Extra), "strPDFIsGenerating");
-                progressBar.Value = 50;
-                string pathToProcess = pathQueue[queueIndex];
-                bool success = await Task.Run(() => ButtonClickAction(pathToProcess));
-                if (!success) { break; }
-                pathQueue.RemoveAt(queueIndex);
-                if (queueIndex >= pathQueue.Count) {
-                    queueIndex = pathQueue.Count - 1;
-                }
-                if (pathQueue.Count > 0) {
-                    if (queueIndex < 0) { queueIndex = 0; }
-                    DisplayCurrentQueueItem();
-                }
-            }
-            progressBar.Value = 100;
-            StartButton.Enabled = pathQueue.Count > 0;
-            GalleryButton.Enabled = queueIndex >= 0 && Directory.Exists(PathLabel.Text);
-            MsgLabel.Text = pathQueue.Count > 0
-                ? Extra.ApplyResource(typeof(Extra), "strClickToStart")
-                : Extra.ApplyResource(typeof(Extra), "strPDFGenerationSuccess");
-            if (pathQueue.Count == 0) {
-                queueIndex = -1;
-                ClearCurrentView();
-                MsgLabel.Text = Extra.ApplyResource(typeof(Extra), "strPDFGenerationSuccess");
-            }
-            UpdateQueueControls();
-        }
-        static List<string> RecursiveFolder(string path, List<string> dirs) {
-            dirs.Add(path);
-            var TheFolder = new DirectoryInfo(path);
-            foreach (var childFolder in TheFolder.GetDirectories()) {
-                RecursiveFolder(childFolder.FullName, dirs);
-            }
-            return dirs;
-        }
-        private bool ButtonClickAction(string pathToProcess) {
-            var fileName = AppDomain.CurrentDomain.BaseDirectory + @"\Core\ImgsToPDFCore.exe";
-            string tempManifestPath = null;
-            try {
-                if (organizedPages.Any()) {
-                    var selectedPages = organizedPages.Where(page => page.IsSelected).ToList();
-                    PageEdit missingPage = selectedPages.FirstOrDefault(page => !File.Exists(page.Path));
-                    if (missingPage != null) {
-                        MessageBox.Show($"Source image was not found:\n{missingPage.Path}");
-                        return false;
-                    }
-                    var validSelections = selectedPages
-                        .GroupBy(page => page.Path, StringComparer.OrdinalIgnoreCase)
-                        .Select(group => group.First().Clone())
-                        .ToList();
-                    if (validSelections.Count == 0) {
-                        MessageBox.Show(Extra.ApplyResource(typeof(Extra), "strNoValidSelection"));
-                        return false;
-                    }
-                    tempManifestPath = Path.Combine(Path.GetTempPath(), $"ImgsToPDF_pages_{Guid.NewGuid():N}.txt");
-                    PageManifest.Write(tempManifestPath, validSelections);
-                    List<string> argsList = new List<string> {
-                        "--dir-path", pathToProcess,
-                        "--page-manifest", tempManifestPath,
-                        "-l", generateModeBox.SelectedIndex.ToString(),
-                        "--quality", GetSelectedQualityValue().ToString()
-                    };
-                    if (UniformWidth.Checked) { argsList.Add("--uniform-width"); }
-                    string[] args = argsList.ToArray();
-                    var stderr = RunProcess(fileName, args);
-                    if (stderr.Length > 0) {
-                        MessageBox.Show(stderr);
-                        return false;
-                    }
-                    return true;
-                }
-
-                if (Recursive.Checked && Directory.Exists(pathToProcess)) {
-                    RecursiveFolder(pathToProcess, new List<string> { }).AsParallel().WithDegreeOfParallelism(4).ForAll(dirPath => {
-                        List<string> argsList = new List<string> {
-                            "-d", dirPath,
-                            "-l", generateModeBox.SelectedIndex.ToString(),
-                            "--quality", GetSelectedQualityValue().ToString()
-                        };
-                        if (UniformWidth.Checked) { argsList.Add("--uniform-width"); }
-                        string[] args = argsList.ToArray();
-                        var stderr = RunProcess(fileName, args);
-                        if (stderr.Length > 0) {
-                            MessageBox.Show(stderr);
-                        }
-                    });
-                }
-                else {
-                    List<string> argsList = new List<string> {
-                        "-d", pathToProcess,
-                        "-l", generateModeBox.SelectedIndex.ToString(),
-                        "--quality", GetSelectedQualityValue().ToString()
-                    };
-                    if (UniformWidth.Checked) { argsList.Add("--uniform-width"); }
-                    string[] args = argsList.ToArray();
-                    var stderr = RunProcess(fileName, args);
-                    if (stderr.Length > 0) {
-                        MessageBox.Show(stderr);
-                        return false;
-                    }
-                }
-                return true;
-            }
-            catch (Exception ex) {
-                MessageBox.Show(ex.Message);
-                return false;
-            }
-            finally {
-                if (tempManifestPath != null && File.Exists(tempManifestPath)) {
-                    try {
-                        File.Delete(tempManifestPath);
-                    }
-                    catch (Exception) {
-                        // ignore cleanup errors
-                    }
-                }
-            }
-        }
-        /// <summary>
-        /// Runs the core generator process and returns stderr output.
-        /// </summary>
-        /// <param name="fileName">Executable path.</param>
-        /// <param name="args">Command-line arguments.</param>
-        /// <returns>stderr output</returns>
-        private static string RunProcess(string fileName, string[] args) {
-            for (int i = 0; i < args.Length; i++) {
-                if (args[i].EndsWith(@"\")) {
-                    // Preserve a trailing slash after quoting.
-                    args[i] += @"\";
-                }
-                args[i] = string.Format("\"{0}\"", args[i]);
-            }
-            Process p = new Process();
-            p.StartInfo.FileName = fileName;
-            p.StartInfo.Arguments = string.Join(" ", args);
-            p.StartInfo.UseShellExecute = false;
-            p.StartInfo.RedirectStandardError = true;
-            p.StartInfo.CreateNoWindow = true;
-            p.Start();
-            return p.StandardError.ReadToEnd();
-        }
-
         private void GalleryButton_Click(object sender, EventArgs e) {
-            if (!Directory.Exists(PathLabel.Text)) {
+            if (isExporting || !Directory.Exists(PathLabel.Text)) {
                 return;
             }
             using (var galleryForm = new GalleryForm(PathLabel.Text, organizedPages, generateModeBox.SelectedIndex)) {
@@ -433,13 +349,8 @@ namespace ImgsToPDF
                 ?? organizedPages.FirstOrDefault(page => page.IsSelected);
             if (previewPage == null || !File.Exists(previewPage.Path)) { return; }
             ReleaseOwnedPreviewImage();
-            try {
-                ownedPreviewImage = LoadPreviewBitmap(previewPage.Path);
-                PicInFolder.Image = ownedPreviewImage;
-            }
-            catch (Exception) {
-                PicInFolder.Image = Properties.Resources.no_photo;
-            }
+            PicInFolder.Image = Properties.Resources.no_photo;
+            _ = UpdatePreviewAsync(previewPage.Path, false);
         }
         private void toolStripMenuExit_Click(object sender, EventArgs e) {
             this.Close();
@@ -473,6 +384,7 @@ namespace ImgsToPDF
             }
         }
         private void toolStripMenuClearChosen_Click(object sender, EventArgs e) {
+            if (isExporting) { return; }
             pathQueue.Clear();
             queueIndex = -1;
             ClearCurrentView();
@@ -572,6 +484,7 @@ namespace ImgsToPDF
             UpdateLanguageMenuState();
             UpdateTopMostMenuStyle();
             AdjustMainActionButtonsLayout();
+            ReloadExportSettingsLanguage();
 
             if (organizedPages.Any()) {
                 MsgLabel.Text = string.Format(Extra.ApplyResource(typeof(Extra), "strGallerySelected"), organizedPages.Count(page => page.IsSelected));

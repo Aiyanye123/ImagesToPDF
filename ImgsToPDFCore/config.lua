@@ -109,13 +109,7 @@ local function getExtension(path)
 end
 
 local function deleteDir(path)
-    local ok = pcall(function()
-        ioDirectory.Delete(path, true)
-    end)
-    if ok then
-        return
-    end
-    pathUtil.deleteDir(path)
+    commonUtils.RecycleDirectory(path)
 end
 
 -- add your local funcs below

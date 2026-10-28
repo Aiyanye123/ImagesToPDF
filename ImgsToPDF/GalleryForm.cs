@@ -22,8 +22,8 @@ namespace ImgsToPDF
         private readonly VirtualGalleryView galleryView = new VirtualGalleryView();
         private readonly Panel galleryHeaderPanel = new Panel();
         private readonly Label headerSelectionLabel = new Label();
-        private readonly Button sortButton = new Button();
-        private readonly Button menuButton = new Button();
+        private readonly Button undoButton = new Button();
+        private readonly Button redoButton = new Button();
         private readonly ModernPanel extensionCard = new ModernPanel();
         private readonly ModernPanel selectionCard = new ModernPanel();
         private readonly ModernPanel viewCard = new ModernPanel();
@@ -46,6 +46,12 @@ namespace ImgsToPDF
         private readonly Panel previewFlowPanel = new Panel();
         private readonly Panel readingDirectionPanel = new Panel();
         private readonly ContextMenuStrip pageMenu = new ContextMenuStrip();
+        private const int HistoryLimit = 50;
+        private readonly List<GallerySnapshot> undoHistory = new List<GallerySnapshot>();
+        private readonly List<GallerySnapshot> redoHistory = new List<GallerySnapshot>();
+        private GallerySnapshot currentSnapshot;
+        private bool isRestoringHistory;
+        private ToolStripMenuItem restorePageMenuItem;
         private int selectedLayout;
         private string selectionSummaryFormat = "Selected {0} / Total {1}";
         private string confirmPromptFormat = "Generate {0} images?";
@@ -74,7 +80,7 @@ namespace ImgsToPDF
 
         protected override void OnFormClosed(FormClosedEventArgs e) {
             foreach (var item in items) {
-                item.Thumbnail?.Dispose();
+                InvalidateThumbnail(item);
             }
             pageMenu.Dispose();
             base.OnFormClosed(e);
@@ -93,6 +99,8 @@ namespace ImgsToPDF
             LoadImageList();
             InitializeExtensionList();
             ApplyFilter();
+            currentSnapshot = CaptureSnapshot();
+            UpdateHistoryButtons();
         }
 
         private void InitializeModernLayout() {
@@ -118,7 +126,10 @@ namespace ImgsToPDF
 
             galleryView.Dock = DockStyle.None;
             galleryView.BackColor = SurfaceColor;
-            galleryView.SelectionChanged += (s, e) => UpdateSelectionStatus();
+            galleryView.SelectionChanged += (s, e) => {
+                RecordEdit();
+                UpdateSelectionStatus();
+            };
             galleryView.OpenRequested += (s, path) => OpenInViewer(path);
             galleryView.ZoomChanged += (s, e) => UpdateZoomControls();
             galleryView.ContextRequested += GalleryView_ContextRequested;
@@ -142,8 +153,8 @@ namespace ImgsToPDF
             StyleButton(resetZoomButton);
             StyleButton(zoomOutButton);
             StyleButton(zoomInButton);
-            StyleButton(sortButton);
-            StyleButton(menuButton);
+            StyleButton(undoButton);
+            StyleButton(redoButton);
             StyleButton(resetAllButton);
             StyleButton(pageViewButton, true);
             StyleButton(pdfPreviewButton);
@@ -334,9 +345,10 @@ namespace ImgsToPDF
 
         private void layoutRadio_CheckedChanged(object sender, EventArgs e) {
             var radio = sender as RadioButton;
-            if (radio == null || !radio.Checked) { return; }
+            if (radio == null || !radio.Checked || isRestoringHistory) { return; }
             selectedLayout = (int)radio.Tag;
             galleryView.SetLayout(selectedLayout);
+            RecordEdit();
         }
 
         private void previewFlowRadio_CheckedChanged(object sender, EventArgs e) {
@@ -360,16 +372,25 @@ namespace ImgsToPDF
         }
 
         private void resetAllButton_Click(object sender, EventArgs e) {
-            string message = IsChinese ? "恢复自然排序并清除全部旋转、裁边和封面设置？" : "Restore natural order and clear all rotation, crop, and cover settings?";
+            string message = IsChinese ? "恢复为每张原图一页、自然排序，并清除全部旋转、裁边和封面设置？" : "Restore one page per source image in natural order and clear all rotation, crop, and cover settings?";
             if (MessageBox.Show(this, message, Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) { return; }
-            foreach (GalleryItem item in items) {
+            var restored = new List<GalleryItem>();
+            foreach (var group in items.GroupBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.First().OriginalIndex)) {
+                GalleryItem item = group.First();
+                bool isSelected = group.Any(page => page.IsSelected);
+                if (item.Rotation != 0 || IsCropped(item.Crop)) { InvalidateThumbnail(item); }
                 item.Rotation = 0;
                 item.Crop = new RectangleF(0, 0, 1, 1);
                 item.IsCover = false;
-                InvalidateThumbnail(item);
+                item.IsSelected = isSelected;
+                restored.Add(item);
+                foreach (GalleryItem removed in group.Skip(1)) { InvalidateThumbnail(removed); }
             }
-            items.Sort((left, right) => left.OriginalIndex.CompareTo(right.OriginalIndex));
-            RefreshGalleryItems();
+            items.Clear();
+            items.AddRange(restored);
+            contextItem = null;
+            if (RecordEdit()) { RefreshGalleryItems(); }
         }
 
         private void ConfigurePageMenu() {
@@ -377,16 +398,17 @@ namespace ImgsToPDF
             pageMenu.Items.Add(IsChinese ? "左旋 90°" : "Rotate Left 90°", null, (s, e) => RotateContextItem(false));
             pageMenu.Items.Add(IsChinese ? "右旋 90°" : "Rotate Right 90°", null, (s, e) => RotateContextItem(true));
             pageMenu.Items.Add(IsChinese ? "裁边…" : "Crop…", null, (s, e) => CropContextItem());
+            pageMenu.Items.Add(IsChinese ? "拆分左右页" : "Split Left / Right Pages", null, (s, e) => SplitContextItem());
             pageMenu.Items.Add(IsChinese ? "设为封面" : "Set as Cover", null, (s, e) => SetContextItemAsCover());
             pageMenu.Items.Add(new ToolStripSeparator());
-            pageMenu.Items.Add(IsChinese ? "恢复此页" : "Restore This Page", null, (s, e) => RestoreContextItem());
+            restorePageMenuItem = (ToolStripMenuItem)pageMenu.Items.Add(IsChinese ? "恢复此页" : "Restore This Page", null, (s, e) => RestoreContextItem());
         }
 
         private GalleryItem contextItem;
 
         private void GalleryView_ContextRequested(object sender, GalleryItemEventArgs e) {
             contextItem = e.Item;
-            pageMenu.Items[5].Enabled = IsEdited(contextItem) || items.IndexOf(contextItem) != contextItem.OriginalIndex;
+            restorePageMenuItem.Enabled = IsEdited(contextItem) || !HasNaturalPosition(contextItem);
             pageMenu.Show(galleryView, e.Location);
         }
 
@@ -397,7 +419,7 @@ namespace ImgsToPDF
             items.RemoveAt(sourceIndex);
             if (sourceIndex < targetIndex) { targetIndex--; }
             items.Insert(targetIndex, e.Source);
-            RefreshGalleryItems();
+            if (RecordEdit()) { RefreshGalleryItems(); }
         }
 
         private void RotateContextItem(bool clockwise) {
@@ -408,16 +430,17 @@ namespace ImgsToPDF
                 : new RectangleF(crop.Top, 1f - crop.Right, crop.Height, crop.Width);
             contextItem.Rotation = (contextItem.Rotation + (clockwise ? 90 : 270)) % 360;
             InvalidateThumbnail(contextItem);
-            RefreshGalleryItems();
+            if (RecordEdit()) { RefreshGalleryItems(); }
         }
 
         private void CropContextItem() {
             if (contextItem == null) { return; }
             using (var cropForm = new CropForm(contextItem.Path, contextItem.Rotation, contextItem.Crop)) {
                 if (cropForm.ShowDialog(this) != DialogResult.OK) { return; }
+                if (contextItem.Crop == cropForm.Crop) { return; }
                 contextItem.Crop = cropForm.Crop;
                 InvalidateThumbnail(contextItem);
-                RefreshGalleryItems();
+                if (RecordEdit()) { RefreshGalleryItems(); }
             }
         }
 
@@ -427,19 +450,48 @@ namespace ImgsToPDF
             contextItem.IsCover = true;
             items.Remove(contextItem);
             items.Insert(0, contextItem);
-            RefreshGalleryItems();
+            if (RecordEdit()) { RefreshGalleryItems(); }
         }
 
         private void RestoreContextItem() {
             if (contextItem == null) { return; }
+            if (contextItem.Rotation != 0 || IsCropped(contextItem.Crop)) { InvalidateThumbnail(contextItem); }
             contextItem.Rotation = 0;
             contextItem.Crop = new RectangleF(0, 0, 1, 1);
             contextItem.IsCover = false;
-            items.Remove(contextItem);
-            int insertIndex = items.FindIndex(item => item.OriginalIndex > contextItem.OriginalIndex);
-            items.Insert(insertIndex < 0 ? items.Count : insertIndex, contextItem);
+            if (!HasNaturalPosition(contextItem)) {
+                items.Remove(contextItem);
+                int insertIndex = items.FindIndex(item => item.OriginalIndex > contextItem.OriginalIndex);
+                items.Insert(insertIndex < 0 ? items.Count : insertIndex, contextItem);
+            }
+            if (RecordEdit()) { RefreshGalleryItems(); }
+        }
+
+        private bool HasNaturalPosition(GalleryItem item) {
+            int position = items.IndexOf(item);
+            for (int index = 0; index < items.Count; index++) {
+                if (index < position && items[index].OriginalIndex > item.OriginalIndex) { return false; }
+                if (index > position && items[index].OriginalIndex < item.OriginalIndex) { return false; }
+            }
+            return true;
+        }
+
+        private void SplitContextItem() {
+            if (contextItem == null) { return; }
+            int index = items.IndexOf(contextItem);
+            if (index < 0) { return; }
+            RectangleF crop = contextItem.Crop;
+            float middle = crop.Left + crop.Width / 2;
+            if (middle <= crop.Left || middle >= crop.Right) { return; }
+            RectangleF left = RectangleF.FromLTRB(crop.Left, crop.Top, middle, crop.Bottom);
+            RectangleF right = RectangleF.FromLTRB(middle, crop.Top, crop.Right, crop.Bottom);
+            GalleryItem second = CreateGalleryItem(ToPageEdit(contextItem));
+            contextItem.Crop = selectedLayout == 2 ? right : left;
+            second.Crop = selectedLayout == 2 ? left : right;
+            second.IsCover = false;
             InvalidateThumbnail(contextItem);
-            RefreshGalleryItems();
+            items.Insert(index + 1, second);
+            if (RecordEdit()) { RefreshGalleryItems(); }
         }
 
         private void RefreshGalleryItems() {
@@ -447,7 +499,89 @@ namespace ImgsToPDF
             galleryView.SetItems(items);
             galleryView.SetFilter(selectedExtensions, false);
             galleryView.SetLayout(selectedLayout);
+            foreach (ExtensionOption option in extensionCheckedList.Items) {
+                option.Count = items.Count(item => string.Equals(item.Extension, option.Extension, StringComparison.OrdinalIgnoreCase));
+            }
+            extensionCheckedList.Invalidate();
             UpdateSelectionStatus();
+        }
+
+        private GallerySnapshot CaptureSnapshot() {
+            return new GallerySnapshot {
+                Layout = selectedLayout,
+                Pages = items.Select(item => new GalleryPageState { Id = item.Id, Edit = ToPageEdit(item) }).ToList()
+            };
+        }
+
+        private bool RecordEdit() {
+            if (currentSnapshot == null || isRestoringHistory) { return false; }
+            GallerySnapshot next = CaptureSnapshot();
+            if (currentSnapshot.Matches(next)) { return false; }
+            undoHistory.Add(currentSnapshot);
+            if (undoHistory.Count > HistoryLimit) { undoHistory.RemoveAt(0); }
+            redoHistory.Clear();
+            currentSnapshot = next;
+            UpdateHistoryButtons();
+            return true;
+        }
+
+        private void RestoreHistory(List<GallerySnapshot> source, List<GallerySnapshot> destination) {
+            if (source.Count == 0) { return; }
+            destination.Add(currentSnapshot);
+            GallerySnapshot snapshot = source[source.Count - 1];
+            source.RemoveAt(source.Count - 1);
+
+            var remaining = items.ToDictionary(item => item.Id);
+            items.Clear();
+            foreach (GalleryPageState state in snapshot.Pages) {
+                if (!remaining.TryGetValue(state.Id, out GalleryItem item)) {
+                    item = CreateGalleryItem(state.Edit);
+                    item.Id = state.Id;
+                }
+                else {
+                    remaining.Remove(state.Id);
+                    if (item.Rotation != state.Edit.Rotation || item.Crop != state.Edit.Crop) {
+                        InvalidateThumbnail(item);
+                    }
+                    item.Rotation = state.Edit.Rotation;
+                    item.Crop = state.Edit.Crop;
+                    item.IsCover = state.Edit.IsCover;
+                    item.IsSelected = state.Edit.IsSelected;
+                }
+                items.Add(item);
+            }
+            foreach (GalleryItem removed in remaining.Values) { InvalidateThumbnail(removed); }
+            contextItem = null;
+            selectedLayout = snapshot.Layout;
+            isRestoringHistory = true;
+            try {
+                singleLayoutRadio.Checked = selectedLayout == 0;
+                leftToRightRadio.Checked = selectedLayout == 1;
+                rightToLeftRadio.Checked = selectedLayout == 2;
+            }
+            finally {
+                isRestoringHistory = false;
+            }
+            currentSnapshot = snapshot;
+            RefreshGalleryItems();
+            UpdateHistoryButtons();
+        }
+
+        private void UpdateHistoryButtons() {
+            undoButton.Enabled = undoHistory.Count > 0;
+            redoButton.Enabled = redoHistory.Count > 0;
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
+            if (keyData == (Keys.Control | Keys.Z)) {
+                RestoreHistory(undoHistory, redoHistory);
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.Y) || keyData == (Keys.Control | Keys.Shift | Keys.Z)) {
+                RestoreHistory(redoHistory, undoHistory);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private HashSet<string> GetSelectedExtensions() {
@@ -475,13 +609,16 @@ namespace ImgsToPDF
             headerSelectionLabel.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold);
             headerSelectionLabel.ForeColor = Color.FromArgb(35, 42, 52);
             headerSelectionLabel.SetBounds(24, 18, 260, 28);
-            sortButton.Text = "↕";
-            sortButton.SetBounds(0, 14, 40, 34);
-            menuButton.Text = "☰";
-            menuButton.SetBounds(0, 14, 40, 34);
+            undoButton.Text = IsChinese ? "撤销" : "Undo";
+            undoButton.SetBounds(0, 14, 90, 34);
+            undoButton.Click += (s, e) => RestoreHistory(undoHistory, redoHistory);
+            redoButton.Text = IsChinese ? "重做" : "Redo";
+            redoButton.SetBounds(0, 14, 90, 34);
+            redoButton.Click += (s, e) => RestoreHistory(redoHistory, undoHistory);
             galleryHeaderPanel.Controls.Add(headerSelectionLabel);
-            galleryHeaderPanel.Controls.Add(sortButton);
-            galleryHeaderPanel.Controls.Add(menuButton);
+            galleryHeaderPanel.Controls.Add(undoButton);
+            galleryHeaderPanel.Controls.Add(redoButton);
+            UpdateHistoryButtons();
         }
 
         protected override void OnResize(EventArgs e) {
@@ -495,8 +632,9 @@ namespace ImgsToPDF
             int width = Math.Max(0, ClientSize.Width - left);
             int height = Math.Max(0, ClientSize.Height - bottomPanel.Height);
             galleryHeaderPanel.SetBounds(left, 0, width, 64);
-            sortButton.Left = Math.Max(24, width - 104);
-            menuButton.Left = Math.Max(24, width - 54);
+            undoButton.Left = Math.Max(24, width - 204);
+            redoButton.Left = Math.Max(124, width - 104);
+            headerSelectionLabel.Width = Math.Max(0, undoButton.Left - headerSelectionLabel.Left - 12);
             galleryView.SetBounds(left, 64, width, Math.Max(0, height - 64));
         }
 
@@ -569,27 +707,31 @@ namespace ImgsToPDF
                 .ToList();
             var naturalIndexes = naturalPaths.Select((path, index) => new { path, index })
                 .ToDictionary(value => value.path, value => value.index, StringComparer.OrdinalIgnoreCase);
-            var existing = initialPages.Where(page => naturalIndexes.ContainsKey(page.Path))
-                .ToDictionary(page => page.Path, page => page, StringComparer.OrdinalIgnoreCase);
-            IEnumerable<string> orderedPaths = initialPages.Count == 0
-                ? naturalPaths
-                : initialPages.Select(page => page.Path).Where(naturalIndexes.ContainsKey)
-                    .Concat(naturalPaths.Where(path => !existing.ContainsKey(path)));
-            foreach (string file in orderedPaths.Distinct(StringComparer.OrdinalIgnoreCase)) {
-                PageEdit page = existing.TryGetValue(file, out PageEdit value) ? value : null;
-                items.Add(new GalleryItem {
-                    Path = file,
-                    Extension = Path.GetExtension(file)?.ToLower() ?? string.Empty,
-                    OriginalIndex = naturalIndexes[file],
-                    Rotation = page?.Rotation ?? 0,
-                    Crop = page?.Crop ?? new RectangleF(0, 0, 1, 1),
-                    IsCover = page?.IsCover ?? false,
-                    IsSelected = page?.IsSelected ?? true
-                });
+            var existingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (PageEdit page in initialPages.Where(page => naturalIndexes.ContainsKey(page.Path))) {
+                GalleryItem item = CreateGalleryItem(page);
+                item.OriginalIndex = naturalIndexes[page.Path];
+                items.Add(item);
+                existingPaths.Add(page.Path);
+            }
+            foreach (string path in naturalPaths.Where(path => !existingPaths.Contains(path))) {
+                items.Add(CreateGalleryItem(new PageEdit { Path = path, OriginalIndex = naturalIndexes[path] }));
             }
             pathStatusLabel.Text = directoryPath;
-            totalStatusLabel.Text = $"{items.Count} 个文件";
             galleryView.SetItems(items);
+            galleryView.SetLayout(selectedLayout);
+        }
+
+        private static GalleryItem CreateGalleryItem(PageEdit page) {
+            return new GalleryItem {
+                Path = page.Path,
+                Extension = Path.GetExtension(page.Path)?.ToLowerInvariant() ?? string.Empty,
+                OriginalIndex = page.OriginalIndex,
+                Rotation = page.Rotation,
+                Crop = page.Crop,
+                IsCover = page.IsCover,
+                IsSelected = page.IsSelected
+            };
         }
 
         private static PageEdit ToPageEdit(GalleryItem item) {
@@ -669,8 +811,8 @@ namespace ImgsToPDF
         private void UpdateSelectionStatus() {
             int totalCount = items.Count;
             int selectedCount = items.Count(i => i.IsSelected);
-            totalStatusLabel.Text = $"{galleryView.VisibleCount} / {totalCount} 个文件";
-            headerSelectionLabel.Text = $"已选  {selectedCount}  /  总  {totalCount}";
+            totalStatusLabel.Text = IsChinese ? $"{galleryView.VisibleCount} / {totalCount} 页" : $"{galleryView.VisibleCount} / {totalCount} pages";
+            headerSelectionLabel.Text = IsChinese ? $"已选  {selectedCount}  /  总  {totalCount}" : $"Selected  {selectedCount}  /  Total  {totalCount}";
             selectionRing.SelectedCount = selectedCount;
             selectionRing.TotalCount = totalCount;
             selectionStatusLabel.Text = string.Format(selectionSummaryFormat, selectedCount, totalCount);
@@ -761,6 +903,8 @@ namespace ImgsToPDF
 
             protected override void Dispose(bool disposing) {
                 if (disposing) {
+                    foreach (PreviewPage page in previewPages) { page.Preview?.Dispose(); }
+                    previewPages.Clear();
                     nameFont.Dispose();
                 }
                 base.Dispose(disposing);
@@ -978,7 +1122,7 @@ namespace ImgsToPDF
                     var rect = GetItemRect(i);
                     rect.Offset(AutoScrollPosition);
                     DrawItem(e.Graphics, visibleItems[i], rect);
-                    EnsureThumbnail(visibleItems[i]);
+                    _ = EnsureThumbnailAsync(visibleItems[i]);
                 }
                 TrimThumbnailCache();
             }
@@ -1033,28 +1177,6 @@ namespace ImgsToPDF
                     TextRenderer.DrawText(graphics, "✓", nameFont, checkRect, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 }
                 DrawBadges(graphics, item, rect);
-            }
-
-            private void DrawPreviewPage(Graphics graphics, PreviewPage page, Rectangle rect, int pageNumber) {
-                using (var back = new SolidBrush(Color.White))
-                using (var border = new Pen(BorderColor)) {
-                    graphics.FillRectangle(back, rect);
-                    graphics.DrawRectangle(border, rect);
-                }
-                var content = new Rectangle(rect.Left + 12, rect.Top + 30, rect.Width - 24, rect.Height - 62);
-                int slotWidth = content.Width / page.Items.Count;
-                for (int index = 0; index < page.Items.Count; index++) {
-                    GalleryItem item = page.Items[index];
-                    var slot = new Rectangle(content.Left + index * slotWidth, content.Top, slotWidth, content.Height);
-                    if (item.Thumbnail != null) {
-                        item.ThumbnailAccess = ++thumbnailAccess;
-                        graphics.DrawImage(item.Thumbnail, FitRect(item.Thumbnail.Size, slot));
-                    }
-                    DrawBadges(graphics, item, new Rectangle(slot.Left, rect.Top + 4, slot.Width, 24));
-                }
-                TextRenderer.DrawText(graphics, (IsChinese ? "第 " : "Page ") + pageNumber, nameFont,
-                    new Rectangle(rect.Left + 8, rect.Bottom - 26, rect.Width - 16, 20),
-                    Color.FromArgb(74, 84, 102), TextFormatFlags.HorizontalCenter);
             }
 
             private void DrawPdfReader(Graphics graphics) {
@@ -1129,7 +1251,10 @@ namespace ImgsToPDF
                     : new Rectangle(slot.Left, slot.Bottom + 12, slot.Width, 22);
                 TextRenderer.DrawText(graphics, (IsChinese ? "第 " : "Page ") + pageNumber, nameFont,
                     numberRect, compact ? Color.DimGray : Color.Gainsboro, TextFormatFlags.HorizontalCenter);
-                EnsurePagePreview(page);
+                foreach (GalleryItem item in page.Items) {
+                    if (item.Size.IsEmpty) { _ = EnsureThumbnailAsync(item); }
+                }
+                _ = EnsurePagePreviewAsync(page);
             }
 
             private static IEnumerable<string> GetEditLabels(GalleryItem item) {
@@ -1309,16 +1434,16 @@ namespace ImgsToPDF
 
             private void PrefetchPreviewPages() {
                 if (!pdfPreview || previewPages.Count == 0) { return; }
-                EnsurePagePreview(previewPages[currentPreviewPage]);
-                if (currentPreviewPage > 0) { EnsurePagePreview(previewPages[currentPreviewPage - 1]); }
-                if (currentPreviewPage + 1 < previewPages.Count) { EnsurePagePreview(previewPages[currentPreviewPage + 1]); }
+                _ = EnsurePagePreviewAsync(previewPages[currentPreviewPage]);
+                if (currentPreviewPage > 0) { _ = EnsurePagePreviewAsync(previewPages[currentPreviewPage - 1]); }
+                if (currentPreviewPage + 1 < previewPages.Count) { _ = EnsurePagePreviewAsync(previewPages[currentPreviewPage + 1]); }
             }
 
-            private void EnsureThumbnail(GalleryItem item) {
+            private async Task EnsureThumbnailAsync(GalleryItem item) {
                 if (item.Thumbnail != null || item.IsLoading) { return; }
                 item.IsLoading = true;
                 int version = item.ThumbnailVersion;
-                Task.Run(() => {
+                ThumbnailData thumbnail = await Task.Run(() => {
                     ThumbnailGate.Wait();
                     try {
                         return LoadThumbnail(item);
@@ -1326,42 +1451,48 @@ namespace ImgsToPDF
                     finally {
                         ThumbnailGate.Release();
                     }
-                }).ContinueWith(task => {
-                    if (IsDisposed || !IsHandleCreated) {
-                        if (task.Status == TaskStatus.RanToCompletion) { task.Result?.Thumbnail?.Dispose(); }
-                        return;
-                    }
-                    try {
-                        BeginInvoke(new Action(() => {
-                            if (IsDisposed) { return; }
-                            var thumbnail = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
-                            item.IsLoading = false;
-                            if (thumbnail != null && item.ThumbnailVersion == version) {
-                                item.Thumbnail = thumbnail.Thumbnail;
-                                item.Size = thumbnail.Size;
-                            }
-                            else {
-                                thumbnail?.Thumbnail?.Dispose();
-                            }
-                            RebuildPreview();
-                            Invalidate();
-                        }));
-                    }
-                    catch (InvalidOperationException) {
-                        item.IsLoading = false;
-                    }
                 });
+                if (item.ThumbnailVersion != version || !items.Contains(item)) {
+                    thumbnail?.Thumbnail?.Dispose();
+                    return;
+                }
+                item.IsLoading = false;
+                if (IsDisposed || !IsHandleCreated) {
+                    thumbnail?.Thumbnail?.Dispose();
+                    return;
+                }
+                if (thumbnail != null) {
+                    bool wasLandscape = !item.Size.IsEmpty && item.Size.Width > item.Size.Height;
+                    item.Thumbnail = thumbnail.Thumbnail;
+                    item.Size = thumbnail.Size;
+                    bool isLandscape = item.Size.Width > item.Size.Height;
+                    if (pdfPreview) {
+                        if (layout != 0 && item.IsSelected && !item.IsCover && wasLandscape != isLandscape) {
+                            RebuildPreview();
+                        }
+                        else {
+                            UpdatePreviewScrollbars();
+                        }
+                    }
+                }
+                Invalidate();
             }
 
             private static ThumbnailData LoadThumbnail(GalleryItem item) {
                 try {
                     using (var source = LoadBitmapSafe(item.Path)) {
                         if (source == null) { return null; }
+                        if (item.Rotation == 0 && !IsCropped(item.Crop)) {
+                            return new ThumbnailData {
+                                Size = source.Size,
+                                Thumbnail = CreateThumbnail(source, BaseThumbSize)
+                            };
+                        }
                         using (var image = ApplyPreviewEdits(source, item.Rotation, item.Crop)) {
-                        return new ThumbnailData {
-                            Size = image.Size,
-                            Thumbnail = CreateThumbnail(image, BaseThumbSize)
-                        };
+                            return new ThumbnailData {
+                                Size = image.Size,
+                                Thumbnail = CreateThumbnail(image, BaseThumbSize)
+                            };
                         }
                     }
                 }
@@ -1401,30 +1532,22 @@ namespace ImgsToPDF
                 return result;
             }
 
-            private void EnsurePagePreview(PreviewPage page) {
-                if (page.Preview != null || page.IsLoading) { return; }
+            private async Task EnsurePagePreviewAsync(PreviewPage page) {
+                if (page.Preview != null || page.IsLoading || !previewPages.Contains(page)) { return; }
                 page.IsLoading = true;
-                Task.Run(() => {
+                Image preview = await Task.Run(() => {
                     PreviewGate.Wait();
                     try { return LoadPagePreview(page); }
                     finally { PreviewGate.Release(); }
-                }).ContinueWith(task => {
-                    Image preview = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
-                    if (IsDisposed || !IsHandleCreated) { preview?.Dispose(); return; }
-                    try {
-                        BeginInvoke(new Action(() => {
-                            page.IsLoading = false;
-                            if (!previewPages.Contains(page)) { preview?.Dispose(); return; }
-                            page.Preview = preview;
-                            UpdatePreviewScrollbars();
-                            Invalidate();
-                        }));
-                    }
-                    catch (InvalidOperationException) {
-                        preview?.Dispose();
-                        page.IsLoading = false;
-                    }
                 });
+                page.IsLoading = false;
+                if (IsDisposed || !IsHandleCreated || !previewPages.Contains(page)) {
+                    preview?.Dispose();
+                    return;
+                }
+                page.Preview = preview;
+                UpdatePreviewScrollbars();
+                Invalidate();
             }
 
             private static Image LoadPagePreview(PreviewPage page) {
@@ -1449,6 +1572,9 @@ namespace ImgsToPDF
                         }
                         return ResizeToMaxEdge(combined, 1800);
                     }
+                }
+                catch (Exception) {
+                    return null;
                 }
                 finally {
                     foreach (Bitmap bitmap in edited) { bitmap.Dispose(); }
@@ -1689,6 +1815,7 @@ namespace ImgsToPDF
 
         private sealed class GalleryItem
         {
+            public Guid Id { get; set; } = Guid.NewGuid();
             public string Path { get; set; }
             public string Extension { get; set; }
             public int OriginalIndex { get; set; }
@@ -1701,6 +1828,35 @@ namespace ImgsToPDF
             public Image Thumbnail { get; set; }
             public int ThumbnailVersion { get; set; }
             public long ThumbnailAccess { get; set; }
+        }
+
+        private sealed class GallerySnapshot
+        {
+            public int Layout { get; set; }
+            public List<GalleryPageState> Pages { get; set; }
+
+            public bool Matches(GallerySnapshot other) {
+                if (Layout != other.Layout || Pages.Count != other.Pages.Count) { return false; }
+                for (int index = 0; index < Pages.Count; index++) {
+                    GalleryPageState left = Pages[index];
+                    GalleryPageState right = other.Pages[index];
+                    PageEdit leftEdit = left.Edit;
+                    PageEdit rightEdit = right.Edit;
+                    if (left.Id != right.Id || !string.Equals(leftEdit.Path, rightEdit.Path, StringComparison.OrdinalIgnoreCase)
+                        || leftEdit.OriginalIndex != rightEdit.OriginalIndex || leftEdit.IsSelected != rightEdit.IsSelected
+                        || leftEdit.Rotation != rightEdit.Rotation || leftEdit.Crop != rightEdit.Crop
+                        || leftEdit.IsCover != rightEdit.IsCover) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        private sealed class GalleryPageState
+        {
+            public Guid Id { get; set; }
+            public PageEdit Edit { get; set; }
         }
 
         private sealed class ThumbnailData

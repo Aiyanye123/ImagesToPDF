@@ -53,7 +53,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="Microsoft.VisualBasic" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Configuration" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
@@ -80,6 +82,10 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="ImgsToPDF.Designer.cs">
+      <DependentUpon>ImgsToPDF.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ExportController.cs" />
+    <Compile Include="ExportSettings.cs">
       <DependentUpon>ImgsToPDF.cs</DependentUpon>
     </Compile>
     <Compile Include="Lang\Extra.cs" />

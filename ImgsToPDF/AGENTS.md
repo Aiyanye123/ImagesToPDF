@@ -1,33 +1,29 @@
-# Repository Guidelines
+# WinForms 界面补充说明
 
-## Project Structure & Module Organization
+本目录继承根目录 `AGENTS.md`。构建、核心协议及验证范围参照根目录说明。
 
-This directory contains the `ImgsToPDF` Windows Forms application targeting .NET Framework 4.8. Main UI code lives in `ImgsToPDF.cs` and `GalleryForm.cs`; designer-generated files use the matching `*.Designer.cs` pattern and should normally be changed through Visual Studio designer tools. Localized strings and form resources live in `*.resx`, `*.zh.resx`, and `Lang/`. Static images are in `Resources/`. `Core/` contains bundled runtime files copied to the output directory by the project post-build step. Build outputs in `bin/` and `obj/` are generated artifacts.
+## 文件职责
 
-## Build, Test, and Development Commands
+- `ImgsToPDF.cs` 管理目录/压缩包队列、主预览、语言和置顶设置；`ExportController.cs` 集中导出参数、进度和安全停止，`ExportSettings.cs` 提供全局输出目录配置。
+- `GalleryForm.cs` 管理专业整理；内嵌的 `VirtualGalleryView` 负责可视区域绘制、缩略图及 PDF 布局预览。
+- `CropForm.cs` 管理单页裁剪交互；图库中的旋转操作同时换算裁剪区域，维持原可见内容。
+- `*.Designer.cs` 和资源生成类保留最小改动；新增布局优先遵循现有代码与设计器分工。
+- 本地化资源位于 `*.resx`、`*.zh.resx`、`Lang/`；静态图片位于 `Resources/`。修改可见文案时考虑中英文切换。
 
-From this directory:
+## 交互与资源
 
-```powershell
-msbuild ImgsToPDF.csproj /p:Configuration=Debug /p:Platform=x64
-msbuild ImgsToPDF.csproj /p:Configuration=Release /p:Platform=x64
-.\bin\x64\Debug\ImgsToPDF.exe
-```
+- 页面排序、勾选、旋转、裁剪和封面操作为非破坏式编辑；确认后回传，取消时保留主窗体原状态。
+- 撤销/重做保存页面顺序、选择、编辑和阅读布局，不保存筛选及缩放偏好。左右拆分基于当前旋转后的裁剪区域，右至左布局中右半在前；每个逻辑页使用独立身份，允许重复源路径。
+- 开始按钮在导出期间切换为停止；导出设置在 UI 线程取快照，后台进程编排不读写控件。关闭窗口时等待合作停止和资源释放。
+- 主预览后台加载并限制同时解码数；过期结果须释放，避免快速切换目录后串图。
+- 图库异步加载从 UI 上下文调用，通过 `await` 回到 UI 更新状态。保留并发门限、缩略图版本、页面归属及生命周期判断。
+- 仅在实际分组变化时重建 PDF 预览；单张缩略图完成不应无条件清空所有预览缓存。
+- 图片须有清晰的所有者。缩略图缓存、页面预览缓存、裁剪窗体和主预览在替换或关闭时释放所属图片；共享资源图片不按自有位图释放。
+- 图片列表按可视区域加载；预览仅保留有限数量的中等尺寸图片。无编辑缩略图直接从源图生成，避免多复制一份整图。
+- 界面保持简洁，文案面向图片整理与导出操作；工程说明和内部代理信息放在文档中。
 
-Use the Debug build for local development and the Release build for distributable binaries. The parent directory also contains `ImgsToPDF.sln` for Visual Studio users.
+## 验收提示
 
-## Coding Style & Naming Conventions
-
-Use C# 7.3-compatible syntax. Keep four-space indentation and the existing brace style (`namespace ImgsToPDF {`). Public types and methods use PascalCase; locals and private fields use camelCase unless existing nearby code differs. Keep generated designer and resource files minimal and avoid hand-editing generated sections. Code comments should be brief and useful; follow the surrounding language when touching existing comments.
-
-## Testing Guidelines
-
-There is no dedicated automated test project in this tree. For logic changes, add the smallest practical check near the changed code or document the manual verification performed. For UI changes, manually run `.\bin\x64\Debug\ImgsToPDF.exe` and verify the affected form, language resources, image loading, and PDF generation path.
-
-## Commit & Pull Request Guidelines
-
-No Git history is available in this checkout, so prefer concise imperative commit messages such as `Fix gallery image ordering` or `Update Chinese resources`. Pull requests should describe the user-visible change, list manual test steps, mention affected resource files, and include screenshots for visible UI changes.
-
-## Security & Configuration Tips
-
-Do not commit secrets, local paths, or machine-specific settings. Treat files in `Core/` as shipped dependencies: replace them deliberately, keep versions traceable in the PR, and verify the post-build copy still produces a runnable `bin/x64/*` output.
+- 仅按本次修改列出受影响操作，例如快速切换目录、缩略图加载中编辑、切换单/双页与横/纵预览、加载中关闭窗口。
+- 导出入口改动同时考虑普通目录、专业整理清单和递归目录；不自动扩大为全界面回归。
+- 文档修改只回读；UI 改动由用户执行人工验收，遵守根目录的 UI 验证约束。

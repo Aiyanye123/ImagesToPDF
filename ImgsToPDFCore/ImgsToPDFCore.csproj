@@ -47,6 +47,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CSGlobal.cs" />
+    <Compile Include="ExportRuntime.cs" />
     <Compile Include="ImageFileExtensions.cs" />
     <Compile Include="IConfig.cs" />
     <Compile Include="PageManifest.cs" />
